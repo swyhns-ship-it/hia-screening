@@ -1,0 +1,15 @@
+# 密钥(每台机器/云端各配一次,不随 git 同步)
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 编辑器/系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

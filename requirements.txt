@@ -1,0 +1,6 @@
+# 运行时依赖(版本已锁定)。云端建议 Python 3.11。
+# 本工具不含任何机器学习/地理计算,依赖极轻 —— 无 numpy/scipy/sklearn/folium。
+streamlit==1.40.1
+python-docx==1.1.2
+pypdf==6.13.1
+# requests 由 streamlit 间接安装(HIA 引擎调 DeepSeek 用),无需显式列出。
