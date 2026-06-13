@@ -34,15 +34,30 @@
 - 离线 `eval` 批测(上线前自检)与界面专家反馈(上线后校准)用同一套改进动作(改 keys/同义词/停用词/提示词)。
 
 ## 部署现状(2026-06-13)
-- **已上线**:阿里云 ECS(华东2·上海,2核2G,Alibaba Cloud Linux 3,Python 3.11)。systemd 服务名 **`hia`**,部署目录 `/opt/hia-screening`(内有 `.venv`),监听 **8502**,环境变量在 **`/etc/hia-screening.env`**(含 DEEPSEEK_API_KEY / APP_PASSWORD / STORAGE_SECRET / PORT,**不入库**)。内存占用 ~55M,配置充裕。
+- **已上线 + 端到端验证通过**:阿里云 ECS(华东2·上海,2核2G,Alibaba Cloud Linux 3,Python 3.11)。systemd 服务名 **`hia`**,部署目录 `/opt/hia-screening`(内有 `.venv`),监听 **8502**,环境变量在 **`/etc/hia-screening.env`**(含 DEEPSEEK_API_KEY / APP_PASSWORD / STORAGE_SECRET / PORT,**不入库**)。内存占用 ~55M。
+- 已公网走通整条:口令门 → 上传政策 PDF → AI 初筛 → 创建案例(案例码+口令)→ 专家凭口令独立评定 → 逐题共识/分歧 → 组长定稿导出 → 政策原文下载。
 - **更新部署**(服务器上):`cd /opt/hia-screening && git pull && .venv/bin/pip install -r requirements.txt && systemctl restart hia`
-- 公网访问目前走 `IP:8502`(IP 与口令见本地/控制台记录,不写入本公开仓库)。安全组已放行 8502。
+- 公网访问目前走 `IP:8502`(IP/口令见本地/控制台记录,不写入本公开仓库)。安全组已放行 8502。
+
+## 大局:实验室统一站(2026-06-13 定的方向)
+有了域名后,要把**实验室门户 + 分析平台(hia_demo)+ HIA 初筛工具**拢成"一个成品级实验室站",架构=**一个域名 + 统一品牌 + 门户串子应用**(不做单体):
+- `tjhealthycitylab.com`(主域名)→ **实验室门户**(静态站,已起草,见下"相关项目")。
+- `hia.tjhealthycitylab.com` → 本 HIA 工具(已上线,阿里云)。
+- `platform.tjhealthycitylab.com` → 分析平台 hia_demo(待部署;Streamlit;UI 后续可增量迁 NiceGUI)。
+- 域名 `tjhealthycitylab.com` 已注册(个人实名),**ICP 备案进行中**(大陆服务器必须,3–20 天);备案通过按 `docs/DEPLOY_HTTPS.md` 上 HTTPS。
+
+## 相关项目(同一台开发机,各自独立)
+- **实验室门户**:`E:\projects\healthycitylab_portal`(纯静态 index.html + style.css,健康绿主题,与本工具一套视觉)。已起草:Hero/关于/研究方向/平台与工具入口/方法亮点/团队/成果/页脚。**待补真实内容**(团队成员、代表性成果、联系邮箱——均标了"待补充",未编造)。本地预览 `python -m http.server`;部署=丢服务器 nginx 静态目录。**尚未建 git 远程**。
+- **分析平台**:`E:\projects\hia_demo`(Streamlit,重型 ML+地图)。计划部署到服务器(见下);UI 升级单独立项、增量迁。
+- **实验室自有服务器**:`ssh tongji@101.35.31.42 -p 2301`——实测为**腾讯云中转 + frp 内网穿透**到校内真机(私有 IP 192.168.x、带 Docker、出口上海电信)。**适合跑重型平台 + 校内/内部访问**;对外公开因隧道带宽/备案问题不划算 → **公开服务仍留阿里云**。今日暂不部署它。
 
 ## 待办 / 进行中
-1. **域名 + HTTPS**:已注册 `tjhealthycitylab.com`(个人实名),拟用子域名 **`hia.tjhealthycitylab.com`**。大陆服务器**必须先 ICP 备案**(3–20 天)。备案通过后按 `docs/DEPLOY_HTTPS.md` 配 DNS + Nginx + HTTPS。
-2. **知识库扩充**(进行中):用户在 `std.samr.gov.cn` 按 `docs/gb_standards_shoplist.md` / `standards_master_list.md` 取证;拿到**现行编号+URL** 后,加进 `hia_evidence.py` 的 `CARDS` + 配 `_SYN_GROUPS` 同义词 + 跑 `eval` 验证(待补率下降、无错配)。
-3. **安全收尾**:DeepSeek key 在协作过程中明文出现过,**需轮换**(改 `/etc/hia-screening.env` 后 `systemctl restart hia`);安全组从 `0.0.0.0/0` 收紧到委内 IP 段。
-4. **可选功能**:项目台账状态流转、角色/权限、监管看板(跨案例统计)、站内推送通知。
+1. **域名 + HTTPS**:`tjhealthycitylab.com` 备案通过后,按 `docs/DEPLOY_HTTPS.md` 配 `hia.` 子域名 DNS+Nginx+HTTPS。
+2. **知识库扩充**(进行中):用户在 `std.samr.gov.cn` 按 `docs/gb_standards_shoplist.md` / `standards_master_list.md` 取证;拿到**现行编号+URL** 后加进 `hia_evidence.py` 的 `CARDS` + 配 `_SYN_GROUPS` + 跑 `eval` 验证。
+3. **实验室门户**:补真实内容 → 建 git 仓库 → 备案后挂主域名。
+4. **分析平台部署**:hia_demo 部署到实验室真机(校内/内部)或阿里云(若升配);先原样搬,UI 后议。
+5. **安全收尾**:DeepSeek key 明文出现过,**需轮换**(改 `/etc/hia-screening.env` 后 `systemctl restart hia`);实验室服务器 **SSH 密码需改**;安全组从 `0.0.0.0/0` 收紧。
+6. **可选功能**:项目台账状态流转、角色/权限、监管看板、站内推送。
 
 ## 跨机器工作流
 - **开工** `git pull`;**收工** `git add -A && git commit -m "..." && git push`。
