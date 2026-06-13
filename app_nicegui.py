@@ -598,7 +598,8 @@ def panel():
                 n.dismiss(); create_btn.enable(); ui.notify(f"分析失败:{ex}", type="negative"); return
             n.dismiss(); create_btn.enable()
             case = case_store.create_case(name_in.value or new["name"], res, info,
-                                          n_experts=int(n_exp.value or 3))
+                                          n_experts=int(n_exp.value or 3),
+                                          doc_bytes=new["bytes"], doc_filename=new["fname"])
             created_box.clear()
             with created_box:
                 with ui.card().classes("w-full").style("background:#F1F8F4;border:1px solid #CFE0D5;"):
@@ -646,6 +647,11 @@ def _render_case_panel(c, refresher):
     cid = c["id"]
     ui.label(f"专家评审链接:/review/{cid}　|　口令:{c['expert_pwd']}").classes(
         "text-xs").style("font-family:monospace;color:#5a7a66;")
+    dp = case_store.doc_path(c)
+    if dp:
+        ui.button("📄 政策原文(" + (c.get("doc_name") or "文件") + ")",
+                  on_click=lambda d=dp, n=c.get("doc_name") or "policy": ui.download(d, n)).props(
+            "flat dense color=primary")
     reviews = c.get("reviews", [])
     if not reviews:
         ui.label("尚无专家提交。把链接+口令发给专家即可。").classes("text-xs text-grey")
@@ -738,6 +744,18 @@ def _render_review_form(case):
     allp = res.get("pathways", [])
     res_items = {it["q"]: it for it in res.get("items", [])}
     ans, note = {}, {}
+
+    # 政策原文(供专家先读原件,再核对 AI 草案)
+    dp = case_store.doc_path(case)
+    if dp:
+        ui.button("📄 查看 / 下载政策原文(" + (case.get("doc_name") or "文件") + ")",
+                  on_click=lambda: ui.download(dp, case.get("doc_name") or "policy")).props(
+            "color=primary").classes("q-mt-sm")
+        ui.label("建议先阅读政策原文,再逐条核对下方 AI 梳理的健康影响。").classes(
+            "text-xs text-grey")
+    else:
+        ui.label("⚠ 本案例未随附政策原文(可能为旧案例);如需原件请联系经办人员。").classes(
+            "text-xs").style("color:#B07A00;")
 
     if res.get("summary"):
         with ui.card().classes("w-full").style("background:#EAF4FF;border:1px solid #CFE3FB;"):

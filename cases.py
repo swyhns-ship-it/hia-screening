@@ -35,17 +35,32 @@ def _path(cid):
     return os.path.join(CASES_DIR, f"{cid}.json")
 
 
-def create_case(name, res, docinfo, n_experts=3, creator="", pwd=None):
+def create_case(name, res, docinfo, n_experts=3, creator="", pwd=None,
+                doc_bytes=None, doc_filename=""):
     os.makedirs(CASES_DIR, exist_ok=True)
     cid = new_id()
     case = {
         "id": cid, "name": name or "评估对象", "created": _now(), "creator": creator,
         "status": "评审中", "expert_pwd": pwd or new_pwd(), "n_experts": int(n_experts),
         "res": res, "docinfo": docinfo,
+        "doc_name": doc_filename or "", "doc_file": None,   # 政策原文(供专家查阅下载)
         "reviews": [], "consensus": None,
     }
+    if doc_bytes and doc_filename:
+        ext = os.path.splitext(doc_filename)[1] or ".bin"
+        stored = cid + ext
+        with open(os.path.join(CASES_DIR, stored), "wb") as f:
+            f.write(doc_bytes)
+        case["doc_file"] = stored
     save_case(case)
     return case
+
+
+def doc_path(case):
+    """案例原始政策文档的本地路径;无则 None。"""
+    f = (case or {}).get("doc_file")
+    p = os.path.join(CASES_DIR, f) if f else None
+    return p if (p and os.path.exists(p)) else None
 
 
 def save_case(case):
