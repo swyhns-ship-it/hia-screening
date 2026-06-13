@@ -17,12 +17,41 @@
 import os
 from datetime import date
 
-from nicegui import ui, run
+from nicegui import ui, run, app
 
 import hia_screen as hs
 import hia_evidence  # noqa: F401 (annotate 在 analyze 内部用)
 import feedback as fb_engine
 import cases as case_store
+
+# —— 部署配置(走环境变量,不放明文)——
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()   # 经办台访问口令;未配则不拦(本地开发)
+APP_PORT = int(os.environ.get("PORT", "8502"))
+STORAGE_SECRET = os.environ.get("STORAGE_SECRET", "hia-screening-dev-secret")
+
+
+def require_app_login():
+    """经办台(/、/panel)访问口令门。配置 APP_PASSWORD 才启用;专家 /review 用案例口令,不受此限。
+    返回 True 放行;否则渲染登录界面并返回 False(调用方应 return)。"""
+    if not APP_PASSWORD:
+        return True
+    if app.storage.user.get("staff_authed"):
+        return True
+    _page_head()
+    with ui.column().classes("w-full items-center").style("margin-top:3rem;gap:.6rem;"):
+        ui.label("🔒 健康影响评估智能初筛系统").style(
+            f"color:{GREEN_DEEP};font-size:1.3rem;font-weight:700;")
+        ui.label("本系统供卫健委工作人员使用,请输入访问口令。").classes("text-sm text-grey")
+
+        def _try():
+            if (pw.value or "") == APP_PASSWORD:
+                app.storage.user["staff_authed"] = True
+                ui.navigate.reload()
+            else:
+                ui.notify("口令不正确。", type="negative")
+        pw = ui.input("访问口令", password=True).on("keydown.enter", _try).style("min-width:260px;")
+        ui.button("进入", on_click=_try).props("color=primary")
+    return False
 
 GREEN = "#2E9E5B"
 GREEN_DEEP = "#1B6B3A"
@@ -109,6 +138,8 @@ def prov_of(p):
 
 @ui.page("/")
 def index():
+    if not require_app_login():
+        return
     ui.colors(primary=GREEN)
     ui.add_head_html('<meta name="robots" content="noindex,nofollow,noarchive">')
     ui.add_head_html(
@@ -515,6 +546,8 @@ def render_pathway_ro(p):
 
 @ui.page("/panel")
 def panel():
+    if not require_app_login():
+        return
     _page_head()
     with ui.row().classes("w-full items-center justify-between q-pa-md").style(
             f"background:linear-gradient(90deg,#EAF7EF,#F6FCF8);border-left:6px solid {GREEN};"
@@ -763,4 +796,5 @@ def _render_review_form(case):
         "text-xs text-grey")
 
 
-ui.run(port=8502, title="健康影响评估智能初筛系统", show=False, reload=False)
+ui.run(host="0.0.0.0", port=APP_PORT, title="健康影响评估智能初筛系统",
+       show=False, reload=False, storage_secret=STORAGE_SECRET)
