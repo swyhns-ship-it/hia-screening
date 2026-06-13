@@ -1,0 +1,13 @@
+# 强制锁定浅色 + 健康绿主题。
+# 面向无操作基础的政务用户:配色固定,不随浏览器/系统深色模式变化(否则文字会压在黑底上看不清)。
+# 配合 theme.py 里隐藏右上角菜单,用户也无法误切到深色。
+[theme]
+base = "light"
+primaryColor = "#2E9E5B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F6FCF8"
+textColor = "#1F2C25"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
