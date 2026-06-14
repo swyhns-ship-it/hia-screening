@@ -14,6 +14,7 @@
        否则在页面顶部的输入框临时填入。
 现有 Streamlit 版(app.py)不受影响,二者各自独立。
 """
+import json
 import os
 from datetime import date
 
@@ -39,9 +40,9 @@ def require_app_login():
         return True
     _page_head()
     with ui.column().classes("w-full items-center").style("margin-top:3rem;gap:.6rem;"):
-        ui.label("🔒 健康影响评估智能初筛系统").style(
+        ui.label("🔒 " + PLATFORM_NAME).style(
             f"color:{GREEN_DEEP};font-size:1.3rem;font-weight:700;")
-        ui.label("本系统供卫健委工作人员使用,请输入访问口令。").classes("text-sm text-grey")
+        ui.label("本平台供卫健委工作人员使用,请输入访问口令。").classes("text-sm text-grey")
 
         def _try():
             if (pw.value or "") == APP_PASSWORD:
@@ -55,6 +56,7 @@ def require_app_login():
 
 GREEN = "#2E9E5B"
 GREEN_DEEP = "#1B6B3A"
+PLATFORM_NAME = "AI辅助健康影响评估"
 ANSWERS = list(hs.ANSWERS)                      # ('是','不知道','否')
 # 简短形(仅用于顶部汇总卡/单选,语境已明确)
 ANSWER_LABEL = {"是": "需要关注", "不知道": "尚不确定", "否": "暂未发现"}
@@ -136,8 +138,8 @@ def prov_of(p):
             GREEN_DEEP if done else "#B07A00")
 
 
-@ui.page("/")
-def index():
+@ui.page("/screen")
+def screen():
     if not require_app_login():
         return
     ui.colors(primary=GREEN)
@@ -149,6 +151,7 @@ def index():
         "</style>")
     # 内容居中 + 限宽,避免全屏过宽难读
     ui.query(".nicegui-content").classes("mx-auto").style("max-width:1000px;")
+    _top_nav("new")
 
     # —— 每会话状态(闭包持有)——
     st = {"file_bytes": None, "file_name": "", "res": None, "docinfo": None}
@@ -164,17 +167,40 @@ def index():
             f"background:linear-gradient(90deg,#EAF7EF,#F6FCF8);border-left:6px solid {GREEN};"
             "border-radius:8px;"):
         with ui.column().classes("gap-0"):
-            ui.label("健康影响评估(HIA)· 辅助决策工具").style(
+            ui.label("新建健康影响评估 · 健康影响初筛(单人)").style(
                 f"color:{GREEN};letter-spacing:2px;font-size:.85rem;font-weight:600;")
-            ui.label("健康影响评估智能初筛系统").style(
+            ui.label("健康影响初筛").style(
                 f"color:{GREEN_DEEP};font-size:1.7rem;font-weight:700;")
             ui.label("智能分析展开健康影响路径 · 对照《健康影响评估初筛表》· 专家核定").style(
                 "color:#5a7a66;font-size:.85rem;")
-        ui.link("专家组协同初筛 →", "/panel").style(
+        ui.link("需要多位专家?→ 专家组协同评估", "/panel").style(
             f"color:{GREEN_DEEP};font-weight:600;font-size:.9rem;").props("no-underline")
 
-    # ===== 使用说明 =====
-    with ui.expansion("📖 使用说明(第一次使用请先看这里)", value=True).classes(
+    # ===== 步骤指引(随分析进度高亮)=====
+    @ui.refreshable
+    def stepper():
+        cur = 2 if st["res"] else 0
+        steps = [("1", "上传文件"), ("2", "智能分析"), ("3", "逐方面核对"), ("4", "导出初筛表")]
+        with ui.row().classes("w-full items-center justify-center q-mb-sm").style(
+                "gap:0;flex-wrap:wrap;"):
+            for i, (n, t) in enumerate(steps):
+                active = i <= cur
+                c = GREEN if active else "#C9D6CD"
+                tc = GREEN_DEEP if active else "#9AA0A6"
+                fw = "600" if active else "400"
+                ui.html(f'<span style="display:inline-flex;align-items:center;gap:6px;margin:0 4px;">'
+                        f'<span style="width:22px;height:22px;border-radius:50%;background:{c};'
+                        f'color:#fff;display:inline-flex;align-items:center;justify-content:center;'
+                        f'font-size:.78rem;font-weight:600;">{n}</span>'
+                        f'<span style="color:{tc};font-size:.85rem;font-weight:{fw};">{t}</span></span>')
+                if i < 3:
+                    seg = GREEN if i < cur else "#E0E8E3"
+                    ui.html(f'<span style="width:30px;height:2px;background:{seg};'
+                            f'display:inline-block;margin:0 3px;"></span>')
+    stepper()
+
+    # ===== 使用说明(默认收起,不占首屏)=====
+    with ui.expansion("📖 使用说明(第一次使用可展开看这里)", value=False).classes(
             "w-full").style("border:1px solid #DCEEE3;border-radius:10px;"):
         ui.markdown(
             "**怎么用?三步:** ①上传要评估的政策/规划文件 → ②点「开始分析」,"
@@ -183,9 +209,12 @@ def index():
             "里面是系统找到的影响(勾掉不认可的),「依据/详情」按需展开。\n\n"
             "⚠️ 本系统借助智能分析技术辅助梳理,**结论和签字以专家判断为准**,不替代专家。")
 
-    # ===== 第 1–2 步:上传 + 分析 =====
-    with ui.card().classes("w-full").style("border:1px solid #DCEEE3;"):
-        ui.label("第 1 步 · 上传要评估的文件").classes("text-base font-medium")
+    # ===== 第 1–2 步:上传 + 分析(分析后自动收起,把版面让给结果)=====
+    upload_exp = ui.expansion("第 1–2 步 · 上传文件并开始智能分析", value=True,
+                              icon="upload_file").classes("w-full").style(
+        "border:1px solid #DCEEE3;border-radius:10px;")
+    with upload_exp:
+        ui.label("第 1 步 · 上传要评估的政策或规划文件").classes("text-base font-medium")
         ui.label("支持 PDF 或 Word(.docx)。扫描成图片的 PDF 暂不支持。").classes(
             "text-xs text-grey")
 
@@ -235,6 +264,8 @@ def index():
             tip = f"已解析{info['kind']}" + (f"·{info['pages']}页" if info["pages"] else "")
             ui.notify(f"✅ {tip};识别 {len(res['actions'])} 项措施、"
                       f"梳理 {len(res['pathways'])} 条影响。", type="positive")
+            upload_exp.value = False          # 分析完成,收起上传区
+            stepper.refresh()
             results.refresh()
 
         analyze_btn = ui.button("🔍 开始分析(约 30–60 秒)", on_click=do_analyze).props(
@@ -422,9 +453,13 @@ def index():
                     "background:#EAF4FF;border:1px solid #CFE3FB;"):
                 ui.markdown("🧭 **总体研判(供参考):** " + res["summary"])
 
-        ui.label("健康影响一览").classes("text-base font-medium q-mt-sm")
-        ui.label("先看全局:每个方块/数字代表一个健康方面的判断(红=需要关注 黄=尚不确定 绿=暂未发现)。").classes("text-xs text-grey")
-        summary()
+        with ui.element("div").classes("w-full").style(
+                "position:sticky;top:0;z-index:50;background:#fff;padding:6px 0 8px;"
+                "border-bottom:1px solid #EEF4F0;box-shadow:0 4px 8px -6px rgba(0,0,0,.12);"):
+            ui.label("健康影响一览").classes("text-base font-medium")
+            ui.label("先看全局:每个方块/数字代表一个健康方面的判断(红=需要关注 黄=尚不确定 绿=暂未发现);"
+                     "向下滚动时本栏始终可见。").classes("text-xs text-grey")
+            summary()
 
         with ui.expansion("🔗 健康影响关系图(措施 → 环节 → 健康方面)",
                           icon="account_tree").classes("w-full").style(
@@ -466,10 +501,26 @@ def index():
             ui.download(buf.getvalue(),
                         f"健康影响评估初筛表_{name_in.value or '评估对象'}.docx")
 
-        ui.button("📄 下载《健康影响评估初筛表》(Word)", on_click=do_download).props(
-            "color=primary").classes("q-mt-sm")
+        def do_save_ledger():
+            items_out = [{"q": q, "answer": ans.get(q, sysans.get(q, "否")),
+                          "note": note.get(q, "")} for q in range(1, 11)]
+            adopted_ids = [p["id"] for p in allp if adopt.get(p["id"])]
+            case = case_store.save_single_case(
+                name_in.value or st.get("name", ""), st["res"], st["docinfo"],
+                items_out, level_radio.value, opinion_in.value,
+                doc_bytes=st.get("file_bytes"), doc_filename=st.get("file_name", ""),
+                adopted_ids=adopted_ids)
+            ui.notify(f"✅ 已存入项目管理系统(案例码 {case['id']});可在「项目管理」中查看、"
+                      f"重新导出或归档。", type="positive", timeout=6000)
+
+        with ui.row().classes("items-center gap-3 q-mt-sm"):
+            ui.button("📄 下载《健康影响评估初筛表》(Word)", on_click=do_download).props(
+                "color=primary")
+            ui.button("🗂 存入项目管理", on_click=do_save_ledger).props("outline color=primary")
         ui.label("初筛表已填好 10 项判断、各项采纳的影响与依据、结论与签字栏。"
-                 "系统仅辅助梳理,签字与最终结论以专家为准。").classes("text-xs text-grey")
+                 "系统仅辅助梳理,签字与最终结论以专家为准。"
+                 "「存入项目管理」会把本次评估归档,便于日后查阅和重新导出。").classes(
+            "text-xs text-grey")
 
         # ===== 第 5 步(可选):提交专家反馈,用于持续改进系统 =====
         ui.separator()
@@ -520,6 +571,26 @@ def _page_head():
     ui.colors(primary=GREEN)
 
 
+# 全站统一顶部导航(平台名 + 三大板块);active ∈ {"new","ledger","reference"}
+_NAV_ITEMS = [("🆕 新建评估", "/new", "new"),
+              ("🗂 项目管理", "/ledger", "ledger"),
+              ("📚 案例参考", "/reference", "reference")]
+
+
+def _top_nav(active=""):
+    with ui.row().classes("w-full items-center gap-4 q-py-xs").style(
+            "border-bottom:1px solid #E3F0E8;margin-bottom:8px;flex-wrap:wrap;"):
+        ui.link("← 返回首页", "/").props("no-underline").style(
+            f"color:{GREEN_DEEP};font-weight:700;font-size:.95rem;")
+        ui.element("div").style("flex:1;")
+        for label, href, key in _NAV_ITEMS:
+            on = (key == active)
+            ui.link(label, href).props("no-underline").style(
+                f"color:{GREEN_DEEP if on else '#5a7a66'};"
+                f"font-weight:{'700' if on else '500'};font-size:.9rem;"
+                + ("border-bottom:2px solid " + GREEN + ";" if on else ""))
+
+
 def render_pathway_ro(p):
     """只读渲染一条影响(供专家评审/汇总页):徽标行 + 影响链 + 依据折叠。"""
     dirc = "#C62828" if p["direction"] == "风险" else GREEN_DEEP
@@ -544,20 +615,51 @@ def render_pathway_ro(p):
             ui.label("⚠ 健康结局端证据待补(暂为机制推断)").classes("text-xs")
 
 
+def _copy_invite(case):
+    """把「评审链接(自动带服务器地址)+ 口令」组成一条可直接粘贴的邀请,复制到剪贴板。"""
+    invite = ("【健康影响评估 · 专家评审邀请】\n"
+              f"评估对象:{case['name']}\n"
+              f"评审链接:__ORIGIN__/review/{case['id']}\n"
+              f"评审口令:{case['expert_pwd']}\n"
+              "请打开链接、输入口令后独立完成评定。")
+    ui.run_javascript("navigator.clipboard.writeText("
+                      + json.dumps(invite) + ".replace('__ORIGIN__', window.location.origin))")
+    ui.notify("已复制完整邀请(含链接+口令),可直接粘贴到微信/邮件。", type="positive")
+
+
+def _created_case_card(case):
+    with ui.card().classes("w-full").style("background:#F1F8F4;border:1px solid #CFE0D5;"):
+        ui.label(f"✅ 案例已创建:{case['name']}").classes("font-medium")
+        with ui.row().classes("items-center gap-4 flex-wrap"):
+            ui.label(f"案例码:{case['id']}").style("font-family:monospace;font-size:.95rem;")
+            ui.label(f"专家口令:{case['expert_pwd']}").style("font-family:monospace;font-size:.95rem;")
+        ui.label("把「专家评审链接 + 口令」发给各位专家(微信/邮件均可):").classes("text-xs text-grey")
+        ui.input("专家评审链接", value=f"/review/{case['id']}").props(
+            "readonly dense").classes("w-full").style("font-family:monospace;")
+        ui.button("📋 复制完整邀请(链接+口令)",
+                  on_click=lambda c=case: _copy_invite(c)).props("color=primary")
+        ui.label("提示:复制的链接会自动带上本服务器地址,口令也一并包含,直接粘贴发送即可。").classes(
+            "text-xs text-grey")
+
+
 @ui.page("/panel")
 def panel():
     if not require_app_login():
         return
     _page_head()
+    _top_nav("new")
     with ui.row().classes("w-full items-center justify-between q-pa-md").style(
             f"background:linear-gradient(90deg,#EAF7EF,#F6FCF8);border-left:6px solid {GREEN};"
             "border-radius:8px;"):
         with ui.column().classes("gap-0"):
-            ui.label("专家组协同初筛 · 经办台").style(
+            ui.label("卫生健康主管部门工作人员 · 发起方").style(
+                f"color:{GREEN};letter-spacing:1px;font-size:.85rem;font-weight:600;")
+            ui.label("发起专家组协同评估 · 经办台").style(
                 f"color:{GREEN_DEEP};font-size:1.5rem;font-weight:700;")
-            ui.label("上传文档→AI 初筛→创建案例→把「案例码+口令」发给专家→汇总共识→组长定稿").style(
+            ui.label("您在此:上传文档→AI 初筛→创建案例→把「评审链接+口令」发给专家→汇总共识→组长定稿。"
+                     "专家无需账号,凭链接+口令即可评定。").style(
                 "color:#5a7a66;font-size:.85rem;")
-        ui.link("← 返回单人初筛", "/").props("no-underline").style(
+        ui.link("单人快速初筛 →", "/screen").props("no-underline").style(
             f"color:{GREEN_DEEP};font-weight:600;")
 
     new = {"bytes": None, "fname": "", "name": ""}
@@ -602,16 +704,7 @@ def panel():
                                           doc_bytes=new["bytes"], doc_filename=new["fname"])
             created_box.clear()
             with created_box:
-                with ui.card().classes("w-full").style("background:#F1F8F4;border:1px solid #CFE0D5;"):
-                    ui.label(f"✅ 案例已创建:{case['name']}").classes("font-medium")
-                    ui.label(f"案例码:{case['id']}　|　专家口令:{case['expert_pwd']}").style(
-                        "font-family:monospace;")
-                    ui.label("把下面这条「专家评审链接 + 口令」发给各位专家(微信/邮件均可):").classes(
-                        "text-xs text-grey")
-                    ui.input("专家评审链接", value=f"/review/{case['id']}").props(
-                        "readonly dense").classes("w-full").style("font-family:monospace;")
-                    ui.label("提示:部署后把链接前补上服务器地址(如 http://你的域名/review/"
-                             + case["id"] + ");口令单独告知专家。").classes("text-xs text-grey")
+                _created_case_card(case)
             cases_list.refresh()
             ui.notify("案例已创建,可在下方列表查看汇总。", type="positive")
 
@@ -712,9 +805,12 @@ def review(cid):
             f"background:linear-gradient(90deg,#EAF7EF,#F6FCF8);border-left:6px solid {GREEN};"
             "border-radius:8px;"):
         with ui.column().classes("gap-0"):
-            ui.label("专家组协同初筛 · 专家评审台").style(
+            ui.label("受邀专家 · 独立评审").style(
+                f"color:{GREEN};letter-spacing:1px;font-size:.85rem;font-weight:600;")
+            ui.label("健康影响评估 · 专家评审").style(
                 f"color:{GREEN_DEEP};font-size:1.4rem;font-weight:700;")
-            ui.label(f"评估对象:{case['name']}").style("color:#5a7a66;font-size:.9rem;")
+            ui.label(f"评估对象:{case['name']}　·　发起方已邀请您对其进行独立评定").style(
+                "color:#5a7a66;font-size:.9rem;")
 
     gate = {"ok": False}
     body = ui.column().classes("w-full")
@@ -734,7 +830,8 @@ def review(cid):
 
     gate_box = ui.column().classes("w-full")
     with gate_box:
-        ui.label("请输入经办人员提供的评审口令:").classes("q-mt-md")
+        ui.label(f"您受邀对「{case['name']}」进行独立评审。").classes("q-mt-md text-sm")
+        ui.label("请输入发起方(经办人员)随链接一同发来的评审口令:").classes("text-xs text-grey")
         pwd_in = ui.input("评审口令", password=True).on("keydown.enter", check_pwd)
         ui.button("进入评审", on_click=check_pwd).props("color=primary")
 
@@ -744,6 +841,15 @@ def _render_review_form(case):
     allp = res.get("pathways", [])
     res_items = {it["q"]: it for it in res.get("items", [])}
     ans, note = {}, {}
+
+    # —— 给专家的任务说明(你只需做这三步)——
+    with ui.card().classes("w-full q-mt-sm").style(
+            "background:#F1F8F4;border:1px solid #CFE0D5;"):
+        ui.label("您的任务(约 5–10 分钟)").classes("font-medium").style(
+            f"color:{GREEN_DEEP};")
+        ui.label("① 阅读政策原文 → ② 逐个健康方面核对 AI 梳理的影响、给出您的独立判断 → "
+                 "③ 署名提交。您的判断将与其他专家汇总成共识,由组长定稿。").classes(
+            "text-xs").style("color:#5a7a66;line-height:1.7;")
 
     # 政策原文(供专家先读原件,再核对 AI 草案)
     dp = case_store.doc_path(case)
@@ -814,5 +920,336 @@ def _render_review_form(case):
         "text-xs text-grey")
 
 
-ui.run(host="0.0.0.0", port=APP_PORT, title="健康影响评估智能初筛系统",
+# ==================== 项目管理系统(既往评估项目统一管理)====================
+
+STATUS_COLOR = {"评审中": "#B07A00", "已定稿": "#1B6B3A",
+                "已归档": "#5a7a66", "作废": "#9AA0A6"}
+SOURCE_COLOR = {case_store.SOURCE_SINGLE: "#2E6DB4", case_store.SOURCE_PANEL: GREEN_DEEP}
+
+
+def _case_export_payload(c):
+    """统一取一个案例的(items, level, opinion, 是否已定稿)用于重新导出。
+    已定稿(单人/协同共识)用 consensus;否则回落 AI 初判草案。"""
+    con = c.get("consensus")
+    if con and con.get("items"):
+        return con["items"], con.get("level") or "轻度", con.get("opinion") or "", True
+    res = c.get("res") or {}
+    items = res.get("items") or [{"q": q, "answer": "否", "note": ""} for q in range(1, 11)]
+    return items, res.get("suggest_level") or "轻度", "", False
+
+
+@ui.page("/ledger")
+def ledger():
+    if not require_app_login():
+        return
+    _page_head()
+    _top_nav("ledger")
+    with ui.row().classes("w-full items-center justify-between q-pa-md").style(
+            f"background:linear-gradient(90deg,#EAF7EF,#F6FCF8);border-left:6px solid {GREEN};"
+            "border-radius:8px;"):
+        with ui.column().classes("gap-0"):
+            ui.label("项目管理 · 既往评估项目").style(
+                f"color:{GREEN_DEEP};font-size:1.5rem;font-weight:700;")
+            ui.label("单人初筛与专家协同的所有评估项目统一在此查阅、重新导出初筛表、归档、发布为参考案例").style(
+                "color:#5a7a66;font-size:.85rem;")
+
+    flt = {"q": "", "status": "全部", "source": "全部"}
+
+    # ===== 筛选条 =====
+    with ui.row().classes("w-full items-center gap-3 q-mt-sm"):
+        q_in = ui.input("按名称搜索", placeholder="输入评估对象名称关键字").props(
+            "dense clearable").classes("flex-grow")
+        q_in.on_value_change(lambda e: (flt.__setitem__("q", (e.value or "").strip()),
+                                        rows.refresh()))
+        st_sel = ui.select(["全部", *case_store.STATUSES], value="全部", label="状态").props(
+            "dense options-dense").style("min-width:120px;")
+        st_sel.on_value_change(lambda e: (flt.__setitem__("status", e.value), rows.refresh()))
+        src_sel = ui.select(["全部", case_store.SOURCE_SINGLE, case_store.SOURCE_PANEL],
+                            value="全部", label="来源").props("dense options-dense").style(
+            "min-width:120px;")
+        src_sel.on_value_change(lambda e: (flt.__setitem__("source", e.value), rows.refresh()))
+
+    stat_box = ui.row().classes("w-full gap-3 q-mt-xs")
+    ui.separator().classes("q-mt-sm")
+
+    def _match(c):
+        if flt["q"] and flt["q"] not in (c.get("name") or ""):
+            return False
+        if flt["status"] != "全部" and c.get("status") != flt["status"]:
+            return False
+        if flt["source"] != "全部" and c.get("source", case_store.SOURCE_PANEL) != flt["source"]:
+            return False
+        return True
+
+    @ui.refreshable
+    def rows():
+        allc = case_store.list_cases()
+        # 顶部小统计(总数 + 按状态)
+        stat_box.clear()
+        with stat_box:
+            ui.label(f"共 {len(allc)} 个项目").classes("text-xs text-grey")
+            for sname in case_store.STATUSES:
+                n = sum(1 for c in allc if c.get("status") == sname)
+                if n:
+                    ui.html(chip(f"{sname} {n}", STATUS_COLOR.get(sname, "#888")))
+        cs = [c for c in allc if _match(c)]
+        if not cs:
+            ui.label("(没有符合条件的项目。)").classes("text-xs text-grey q-mt-md")
+            return
+        for c in cs:
+            _ledger_row(c, rows)
+
+    rows()
+
+
+def _ledger_row(c, refresher):
+    cid = c["id"]
+    src = c.get("source", case_store.SOURCE_PANEL)
+    status = c.get("status", "评审中")
+    con = c.get("consensus") or {}
+    level = con.get("level")
+    with ui.expansion().classes("w-full").style(
+            "border:1px solid #DCEEE3;border-radius:10px;margin-bottom:6px;") as exp:
+        with exp.add_slot("header"):
+            with ui.row().classes("items-center gap-3 w-full no-wrap"):
+                ui.label(c.get("name") or "评估对象").classes("text-sm font-medium").style(
+                    "min-width:160px;")
+                ui.html(chip(src, SOURCE_COLOR.get(src, "#888")))
+                ui.html(chip(status, STATUS_COLOR.get(status, "#888")))
+                if c.get("reference"):
+                    ui.html(chip("⭐ 参考案例", "#C9870A"))
+                if level:
+                    ui.label(f"影响:{level}").classes("text-xs text-grey")
+                extra = ""
+                if src == case_store.SOURCE_PANEL:
+                    extra = f"专家 {len(c.get('reviews', []))}/{c.get('n_experts', 0)}　·　"
+                ui.label(f"{extra}案例码 {cid}　·　{c.get('created', '')}").classes(
+                    "text-xs text-grey")
+
+        # —— 10 题判定一览 ——
+        items, lv, opinion, finalized = _case_export_payload(c)
+        amap = {it["q"]: it.get("answer", "否") for it in items}
+        with ui.row().classes("w-full gap-1 q-mt-xs"):
+            for q in range(1, 11):
+                a = amap.get(q, "否")
+                ui.html(f'<div title="{q}. {hs.SHORT_Q[q-1]}:{ANSWER_LABEL[a]}" '
+                        f'style="flex:1;height:12px;border-radius:3px;'
+                        f'background:{ANSWER_COLOR[a]};"></div>').classes("flex-grow")
+        tag = "专家组共识" if (finalized and src == case_store.SOURCE_PANEL) else (
+            "专家核定" if finalized else "AI 初判草案(未定稿)")
+        ui.label(f"判定依据:{tag}" + (f"　|　总体影响:{lv}" if finalized else "")).classes(
+            "text-xs text-grey")
+        if opinion:
+            ui.label("专家意见:" + opinion).classes("text-xs text-grey")
+
+        # —— 操作区 ——
+        with ui.row().classes("items-center gap-2 q-mt-sm flex-wrap"):
+            def do_reexport(case=c):
+                its, lvl, op, _ = _case_export_payload(case)
+                header = {"name": case["name"], "category": "政府发布/实施", "dept": "",
+                          "submitter": "", "phone": "",
+                          "screen_date": (case.get("created") or "")[:10] or str(date.today()),
+                          "method": ("AI 辅助 + 专家组协同核定(共识)"
+                                     if case.get("source") == case_store.SOURCE_PANEL
+                                     else "智能分析辅助 + 专家核定"),
+                          "related_dept": ""}
+                adopted = case_store.adopted_pathways(case)
+                buf = hs.build_screen_docx(header, its, adopted, lvl, op)
+                ui.download(buf.getvalue(),
+                            f"健康影响评估初筛表_{case['name']}.docx")
+            ui.button("📄 重新导出初筛表", on_click=do_reexport).props("dense flat color=primary")
+
+            dp = case_store.doc_path(c)
+            if dp:
+                ui.button("📎 政策原文", on_click=lambda d=dp, n=c.get("doc_name") or "policy":
+                          ui.download(d, n)).props("dense flat color=primary")
+
+            if src == case_store.SOURCE_PANEL:
+                ui.button("👥 去经办台", on_click=lambda: ui.navigate.to("/panel")).props(
+                    "dense flat color=primary")
+
+            # 状态流转
+            def chg(new_status, case_id=cid):
+                case_store.set_status(case_id, new_status)
+                ui.notify(f"状态已更新:{new_status if new_status != '恢复' else '已恢复'}",
+                          type="positive")
+                refresher.refresh()
+            if status in ("已定稿",):
+                ui.button("📦 归档", on_click=lambda: chg("已归档")).props("dense flat")
+            if status in ("评审中", "已定稿"):
+                ui.button("🚫 作废", on_click=lambda: chg("作废")).props("dense flat color=grey")
+            if status in ("已归档", "作废"):
+                ui.button("↩ 恢复", on_click=lambda: chg("恢复")).props("dense flat color=primary")
+
+            # 发布/取消「参考案例」(仅已定稿可发布)
+            def toggle_ref(case_id=cid, cur=bool(c.get("reference"))):
+                case_store.set_reference(case_id, not cur)
+                ui.notify("已发布为参考案例。" if not cur else "已从参考案例中移除。",
+                          type="positive")
+                refresher.refresh()
+            if c.get("reference"):
+                ui.button("⭐ 取消参考案例", on_click=toggle_ref).props("dense flat color=amber")
+            elif status == "已定稿":
+                ui.button("📣 发布为参考案例", on_click=toggle_ref).props("dense flat color=primary")
+
+            # 删除(二次确认)
+            def ask_delete(case=c):
+                with ui.dialog() as dlg, ui.card():
+                    ui.label(f"确认删除「{case['name']}」?").classes("font-medium")
+                    ui.label("将彻底删除该项目记录与政策原文,不可恢复。").classes(
+                        "text-xs text-grey")
+                    with ui.row().classes("justify-end w-full"):
+                        ui.button("取消", on_click=dlg.close).props("flat")
+
+                        def really():
+                            case_store.delete_case(case["id"])
+                            dlg.close()
+                            ui.notify("已删除。", type="positive")
+                            refresher.refresh()
+                        ui.button("删除", on_click=really).props("color=negative")
+                dlg.open()
+            ui.button("🗑 删除", on_click=ask_delete).props("dense flat color=negative")
+
+
+# ==================== 门户首页 / 新建评估分流 / 案例参考 ====================
+
+def _portal_card(icon, title, desc, href, accent=GREEN):
+    with ui.card().classes("cursor-pointer").style(
+            "width:280px;border:1px solid #DCEEE3;border-radius:14px;padding:20px;"
+            "transition:box-shadow .15s;").on("click", lambda: ui.navigate.to(href)):
+        ui.label(icon).style("font-size:2.2rem;")
+        ui.label(title).style(f"color:{GREEN_DEEP};font-size:1.15rem;font-weight:700;margin-top:4px;")
+        ui.label(desc).classes("text-xs").style("color:#5a7a66;line-height:1.6;min-height:48px;")
+        ui.element("div").style(f"height:3px;width:38px;background:{accent};border-radius:2px;")
+
+
+@ui.page("/")
+def home():
+    if not require_app_login():
+        return
+    _page_head()
+    ui.query(".nicegui-content").style("max-width:980px;")
+    with ui.column().classes("w-full items-center q-pt-lg gap-1"):
+        ui.label("HEALTH IMPACT ASSESSMENT").style(
+            f"color:{GREEN};letter-spacing:4px;font-size:.85rem;font-weight:600;")
+        ui.label(PLATFORM_NAME).style(
+            f"color:{GREEN_DEEP};font-size:2.2rem;font-weight:800;letter-spacing:2px;")
+        ui.label("面向卫生健康主管部门 · 政策与规划的健康影响智能初筛、专家协同评估与项目管理").classes(
+            "text-sm").style("color:#5a7a66;")
+    with ui.row().classes("w-full justify-center gap-5 q-mt-xl flex-wrap"):
+        _portal_card("🆕", "新建健康影响评估",
+                     "上传政策/规划文档,AI 展开健康影响路径、对照初筛表。可选单人快速初筛或多专家协同评估。",
+                     "/new")
+        _portal_card("🗂", "项目管理",
+                     "查阅既往全部评估项目,搜索/筛选、重新导出初筛表、归档与发布参考案例。",
+                     "/ledger")
+        _portal_card("📚", "案例参考",
+                     "浏览已发布为范例的评估项目,学习健康影响识别与判定的参考写法。",
+                     "/reference")
+    with ui.row().classes("w-full justify-center q-mt-xl"):
+        ui.label("⚠ 本平台借助 AI 辅助梳理,结论与签字以专家判断为准,不替代专家。").classes(
+            "text-xs text-grey")
+
+
+@ui.page("/new")
+def new_assessment():
+    if not require_app_login():
+        return
+    _page_head()
+    _top_nav("new")
+    with ui.column().classes("w-full items-center q-pt-md gap-1"):
+        ui.label("新建健康影响评估").style(
+            f"color:{GREEN_DEEP};font-size:1.6rem;font-weight:700;")
+        ui.label("选择评估方式 —— 单人快速初筛,或组织多位专家协同评估。").classes(
+            "text-sm").style("color:#5a7a66;")
+    with ui.row().classes("w-full justify-center gap-5 q-mt-lg flex-wrap"):
+        _portal_card("⚡", "独立完成初筛",
+                     "经办人独立完成:上传文档 → AI 初筛 → 逐方面核对 → 导出初筛表。一人即可,最快得到结果。",
+                     "/screen")
+        _portal_card("📤", "发起专家组协同评估",
+                     "经办人发起:上传文档 → AI 初筛 → 生成「评审链接+口令」邀请多位专家独立评定 → 汇总共识、组长定稿。",
+                     "/panel", accent="#2E6DB4")
+
+
+@ui.page("/reference")
+def reference():
+    if not require_app_login():
+        return
+    _page_head()
+    _top_nav("reference")
+    with ui.row().classes("w-full items-center justify-between q-pa-md").style(
+            f"background:linear-gradient(90deg,#EAF7EF,#F6FCF8);border-left:6px solid {GREEN};"
+            "border-radius:8px;"):
+        with ui.column().classes("gap-0"):
+            ui.label("案例参考 · 评估范例").style(
+                f"color:{GREEN_DEEP};font-size:1.5rem;font-weight:700;")
+            ui.label("以下为在「项目管理」中发布为参考案例的既往评估,供学习健康影响识别与判定写法(只读)。").style(
+                "color:#5a7a66;font-size:.85rem;")
+
+    refs = case_store.list_reference()
+    if not refs:
+        with ui.card().classes("w-full q-mt-md").style("border:1px dashed #CFE0D5;background:#FAFEFB;"):
+            ui.label("暂无参考案例。").classes("font-medium")
+            ui.label("在「项目管理」里选一个已定稿的项目,点「📣 发布为参考案例」,即可在此展示。").classes(
+                "text-xs text-grey")
+        return
+    for c in refs:
+        _reference_row(c)
+
+
+def _reference_row(c):
+    src = c.get("source", case_store.SOURCE_PANEL)
+    items, lv, opinion, finalized = _case_export_payload(c)
+    amap = {it["q"]: it.get("answer", "否") for it in items}
+    with ui.expansion().classes("w-full").style(
+            "border:1px solid #DCEEE3;border-radius:10px;margin-bottom:6px;") as exp:
+        with exp.add_slot("header"):
+            with ui.row().classes("items-center gap-3 w-full no-wrap"):
+                ui.html(chip("⭐ 参考案例", "#C9870A"))
+                ui.label(c.get("name") or "评估对象").classes("text-sm font-medium").style(
+                    "min-width:160px;")
+                ui.html(chip(src, SOURCE_COLOR.get(src, "#888")))
+                if lv:
+                    ui.label(f"总体影响:{lv}").classes("text-xs text-grey")
+                ui.label(c.get("created", "")).classes("text-xs text-grey")
+        # 10 题判定一览
+        with ui.row().classes("w-full gap-1 q-mt-xs"):
+            for q in range(1, 11):
+                a = amap.get(q, "否")
+                ui.html(f'<div title="{q}. {hs.SHORT_Q[q-1]}:{ANSWER_LABEL[a]}" '
+                        f'style="flex:1;height:12px;border-radius:3px;'
+                        f'background:{ANSWER_COLOR[a]};"></div>').classes("flex-grow")
+        if opinion:
+            ui.label("专家组意见:" + opinion).classes("text-xs text-grey q-mt-xs")
+        # 逐题判定 + AI 梳理的影响路径(只读)
+        allp = (c.get("res") or {}).get("pathways", [])
+        for q in range(1, 11):
+            ps = [p for p in allp if p.get("outcome_q") == q]
+            a = amap.get(q, "否")
+            with ui.expansion(value=False).classes("w-full").style(
+                    "border:1px solid #ECF5EF;border-radius:8px;margin-top:4px;") as e2:
+                with e2.add_slot("header"):
+                    with ui.row().classes("items-center gap-3 w-full"):
+                        ui.label(f"{q}. {hs.SHORT_Q[q-1]}").classes("text-sm").style(
+                            "min-width:120px;")
+                        ui.html(chip(ANSWER_LABEL[a], ANSWER_COLOR[a]))
+                        ui.label(f"{len(ps)} 条影响" if ps else "无影响").classes(
+                            "text-xs text-grey")
+                for p in ps:
+                    render_pathway_ro(p)
+                if not ps:
+                    ui.label("该方面未梳理出影响。").classes("text-xs text-grey")
+        # 下载范例初筛表
+        def dl(case=c):
+            its, lvl, op, _ = _case_export_payload(case)
+            header = {"name": case["name"], "category": "政府发布/实施", "dept": "",
+                      "submitter": "", "phone": "",
+                      "screen_date": (case.get("created") or "")[:10] or str(date.today()),
+                      "method": "参考范例", "related_dept": ""}
+            buf = hs.build_screen_docx(header, its, case_store.adopted_pathways(case), lvl, op)
+            ui.download(buf.getvalue(), f"参考案例_健康影响评估初筛表_{case['name']}.docx")
+        ui.button("📄 下载范例初筛表", on_click=dl).props("dense flat color=primary q-mt-sm")
+
+
+ui.run(host="0.0.0.0", port=APP_PORT, title=PLATFORM_NAME,
        show=False, reload=False, storage_secret=STORAGE_SECRET)
