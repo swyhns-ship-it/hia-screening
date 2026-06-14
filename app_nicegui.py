@@ -227,12 +227,12 @@ def _path_flow_html(p, actions):
 
 def chip(text, color):
     return (f'<span style="background:{color};color:#fff;border-radius:9px;'
-            f'padding:1px 8px;font-size:.72rem;white-space:nowrap;">{text}</span>')
+            f'padding:2px 10px;font-size:.82rem;white-space:nowrap;">{text}</span>')
 
 
 def soft_chip(text, color):
     return (f'<span style="color:{color};border:1px solid {color};border-radius:9px;'
-            f'padding:0 7px;font-size:.72rem;white-space:nowrap;">{text}</span>')
+            f'padding:1px 9px;font-size:.82rem;white-space:nowrap;">{text}</span>')
 
 
 def prov_of(p):
@@ -250,10 +250,11 @@ def _render_source_card(c):
     badge = (soft_chip(c.get("tier", "WHO 资料"), GREEN_DEEP) + " "
              + (soft_chip("已核实", GREEN_DEEP) if c.get("status") != "todo"
                 else soft_chip("待补强", "#B07A00")))
-    ui.html(f'<div style="font-size:.78rem;">{badge}</div>')
-    ui.markdown("　来源:" + "；".join(c["sources"])).classes("text-xs")
+    ui.html(f'<div style="font-size:.82rem;margin-top:2px;">{badge}</div>')
+    ui.markdown("　来源:" + "；".join(c["sources"])).classes("text-sm")
     if c.get("note"):
-        ui.label("　要点(概括,以原文链接为准):" + c["note"]).classes("text-xs text-grey")
+        ui.label("　要点(概括,以原文链接为准):" + c["note"]).classes("text-sm").style(
+            "color:#5a7a66;")
 
 
 def render_evidence(cards, last_node="健康结果"):
@@ -261,18 +262,18 @@ def render_evidence(cards, last_node="健康结果"):
     causal = [c for c in (cards or []) if c.get("kind", "因果") == "因果"]
     bench = [c for c in (cards or []) if c.get("kind") == "基准"]
     if causal:
-        ui.html(f'<div style="font-size:.75rem;color:#5a7a66;margin-top:2px;">'
+        ui.html(f'<div style="font-size:.85rem;color:#5a7a66;margin-top:2px;">'
                 f'📚 <b>健康因果依据</b>:下列来源支撑本条<b>最后一段「→ {_esc(last_node)}」的健康影响</b>;'
                 f'链条前段的政策/行为/暴露环节,请结合上传文件与本地情况判断。</div>')
         for c in causal:
             _render_source_card(c)
     else:
-        ui.html('<div style="font-size:.78rem;background:#FFF7E6;border-left:3px solid #B07A00;'
-                'padding:4px 8px;border-radius:4px;">⚠ <b>健康端因果证据待补</b>:'
+        ui.html('<div style="font-size:.85rem;background:#FFF7E6;border-left:3px solid #B07A00;'
+                'padding:5px 9px;border-radius:4px;">⚠ <b>健康端因果证据待补</b>:'
                 '暂无 WHO/文献支撑这条的健康影响,需专家补证后再采纳。</div>')
     if bench:
-        ui.html('<div style="font-size:.75rem;color:#1c4e80;margin-top:5px;background:#EAF1FB;'
-                'border-left:3px solid #2E6DB4;padding:4px 8px;border-radius:4px;">'
+        ui.html('<div style="font-size:.85rem;color:#1c4e80;margin-top:5px;background:#EAF1FB;'
+                'border-left:3px solid #2E6DB4;padding:5px 9px;border-radius:4px;">'
                 '📐 <b>相关国家标准(暴露/环境限值与管控基准)</b>:以下为本路径涉及暴露/环节的国家标准,'
                 '<b>非因果证据</b>,用作评估基准、达标判据与改善建议依据。</div>')
         for c in bench:
@@ -289,9 +290,9 @@ def screen():
         "<style>"
         "body{font-family:'Microsoft YaHei','Noto Sans SC',sans-serif;}"
         ".hia-chain{line-height:1.5;}"
-        ".hia-flow{display:flex;flex-wrap:wrap;align-items:center;gap:5px;line-height:1.8;}"
-        ".hia-node{display:inline-flex;align-items:center;padding:3px 10px;border-radius:8px;"
-        "background:#F2F4F6;color:#33403a;font-size:.83rem;border:1px solid #E2E6EA;"
+        ".hia-flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;line-height:1.9;}"
+        ".hia-node{display:inline-flex;align-items:center;padding:4px 11px;border-radius:8px;"
+        "background:#F2F4F6;color:#2b3640;font-size:.95rem;border:1px solid #E2E6EA;"
         "transition:border-color .12s;}"
         ".hia-node.origin{background:#E8F1FF;border-color:#C4DBF7;color:#1b4f86;"
         "max-width:360px;font-style:italic;}"
@@ -593,7 +594,8 @@ def screen():
             ui.label(hs.SHORT_Q[q - 1]).style(
                 f"color:{GREEN_DEEP};font-size:1.2rem;font-weight:700;")
             ui.html(chip("当前研判:" + ANSWER_FULL[a], ANSWER_COLOR[a]))
-        ui.label("初筛表问题:" + hs.QUESTIONS[q - 1]).classes("text-xs text-grey")
+        ui.label("初筛表问题:" + hs.QUESTIONS[q - 1]).classes("text-sm").style(
+            "color:#5a7a66;")
 
         @ui.refreshable
         def judge_row():
@@ -622,21 +624,14 @@ def screen():
             summary.refresh()
 
         if ps:
-            n_src = sum(1 for p in ps if p.get("cards"))
-            n_gap = len(ps) - n_src
-            ui.html(f'<div style="font-size:.78rem;color:#5a7a66;margin-top:2px;">'
-                    f'本方面共 <b>{len(ps)}</b> 条影响 —— '
-                    f'<b>{n_src}</b> 条有权威来源 · '
-                    f'<b style="color:#B07A00">{n_gap}</b> 条证据待补(机制推断)。'
-                    f'勾掉不认可的影响,本方面判断、选项卡与评估地图会实时更新。</div>')
             for p in ps:
                 with ui.card().classes("w-full hia-path").style(
                         "border:1px solid #E8F1EB;border-radius:10px;"
-                        "padding:10px 12px;margin-top:4px;"):
+                        "padding:12px 14px;margin-top:6px;"):
                     pathway_row(p, after_toggle)
         else:
             ui.label("系统未找到这一方面的影响,默认「暂未发现」。可在下方直接确认或改判。").classes(
-                "text-xs text-grey q-mt-sm")
+                "text-sm").style("color:#9AA0A6;")
 
         judge_row()
         note_in = ui.input("说明 / 备注(可选)", value=note.get(q, "")).classes("w-full")
@@ -663,8 +658,6 @@ def screen():
                             + humanize_summary(res["summary"], res.get("actions")))
 
         ui.label("健康影响一览").classes("text-base font-medium q-mt-sm")
-        ui.label("红=需要关注　黄=尚不确定　绿=暂未发现。下方 10 个健康方面以选项卡呈现,点选逐个核对。").classes(
-            "text-xs text-grey")
         summary()
 
         # ===== 评估地图:弹窗 + 右下角浮动按钮(判断时滚到任何位置都能打开)=====
@@ -689,9 +682,7 @@ def screen():
                     "rounded color=primary size=lg").classes("full-width").style(
                     "box-shadow:0 6px 20px -4px rgba(46,158,91,.55);")
 
-        ui.label("第 3 步 · 逐方面核对、给出判断").classes("text-base font-medium q-mt-md")
-        ui.label("点选项卡切换 10 个健康方面;每张卡的颜色就是当前判断。右下角「🗺 评估地图」可随时打开总览。").classes(
-            "text-xs text-grey")
+        ui.label("逐方面核对、给出判断").classes("text-base font-medium q-mt-md")
         tabstrip()
         panel()
 
