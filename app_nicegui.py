@@ -368,7 +368,7 @@ def screen():
     stepper()
 
     # ===== 使用说明(默认收起,不占首屏)=====
-    with ui.expansion("📖 使用说明(第一次使用可展开看这里)", value=False).classes(
+    with ui.expansion("使用说明(第一次使用可展开看这里)", value=False).classes(
             "w-full").style("border:1px solid #DCEEE3;border-radius:10px;"):
         ui.markdown(
             "**怎么用?三步:** ①上传要评估的政策/规划文件 → ②点「开始分析」,"
@@ -377,14 +377,12 @@ def screen():
             "里面是系统找到的影响(勾掉不认可的),「依据/详情」按需展开。\n\n"
             "⚠️ 本系统借助智能分析技术辅助梳理,**结论和签字以专家判断为准**,不替代专家。")
 
-    # ===== 第 1–2 步:上传 + 分析(分析后自动收起,把版面让给结果)=====
-    upload_exp = ui.expansion("第 1–2 步 · 上传文件并开始智能分析", value=True,
-                              icon="upload_file").classes("w-full").style(
-        "border:1px solid #DCEEE3;border-radius:10px;")
+    # ===== 上传 + 分析(分析后自动收起,把版面让给结果)=====
+    upload_exp = ui.expansion("上传文件并开始智能分析", value=True).classes(
+        "w-full").style("border:1px solid #DCEEE3;border-radius:10px;")
     with upload_exp:
-        ui.label("第 1 步 · 上传要评估的政策或规划文件").classes("text-base font-medium")
-        ui.label("支持 PDF 或 Word(.docx)。扫描成图片的 PDF 暂不支持。").classes(
-            "text-xs text-grey")
+        ui.label("上传要评估的政策或规划文件(支持 PDF / Word;扫描成图片的 PDF 暂不支持)。").classes(
+            "text-sm").style("color:#5a7a66;")
 
         async def on_upload(e):
             st["file_bytes"] = await e.file.read()
@@ -395,13 +393,12 @@ def screen():
         ui.upload(on_upload=on_upload, auto_upload=True, max_files=1).props(
             'accept=".pdf,.docx" flat bordered').classes("w-full")
 
-        ui.label("第 2 步 · 开始智能分析").classes("text-base font-medium q-mt-md")
         key_in = ui.input("分析服务密钥(API Key)", password=True,
-                          value=_get_key(), placeholder="sk-...").classes("w-full")
+                          value=_get_key(), placeholder="sk-...").classes("w-full q-mt-sm")
 
         async def do_analyze():
             if not st["file_bytes"]:
-                ui.notify("请先在第 1 步上传文件。", type="warning")
+                ui.notify("请先上传文件。", type="warning")
                 return
             key = (key_in.value or "").strip()
             if not key:
