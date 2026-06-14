@@ -247,7 +247,19 @@ def _norm_pathways(raw, action_ids, start=1):
             continue
         if not (1 <= q <= len(QUESTIONS)):
             continue
-        chain = [str(c).strip() for c in (p.get("chain") or []) if str(c).strip()]
+        # 归一化 chain:LLM 有时把它返回成字符串(直接遍历会按"字"拆开),
+        # 有时单个元素内部自带 → 箭头;统一拆成干净的环节列表。
+        raw_chain = p.get("chain") or []
+        if isinstance(raw_chain, str):
+            raw_chain = [raw_chain]
+        chain = []
+        seen = set()
+        for c in raw_chain:
+            for part in re.split(r"\s*(?:→|—>|->|⟶|⇒|⇨)\s*", str(c)):
+                part = part.strip()
+                if part and part not in seen:    # 去重:LLM 偶尔让链条绕回先前节点
+                    seen.add(part)
+                    chain.append(part)
         if not chain:
             continue
         aid = str(p.get("action_id", "") or "").strip()

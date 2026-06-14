@@ -22,17 +22,25 @@
 
 ## 架构 / 文件
 - `app_nicegui.py` — NiceGUI 入口 + 三页面(`/` 单人初筛、`/panel` 经办台、`/review/<案例码>` 专家台)+ 访问口令门 `require_app_login`(env `APP_PASSWORD`)。端口/口令/会话密钥走环境变量。
-- `hia_screen.py` — 引擎:3 段 DeepSeek 流水线(行动抽取→多视角路径展开→完整性批判)+ 确定性聚合到 10 题 + 初筛表 docx。坑:DeepSeek json_object 偶发吐空白,需"加扰动重试"(`_chat_json` 已处理)。提示词已:去重复/去政策元评论/严标强度。
-- `hia_evidence.py` — 证据库(**62 张卡**:WHO + 国标/国家政策)。`source_tier` 来源分级;`_STOP_KEYS` 结果/泛化词停用表;`_SYN_GROUPS`(24 组)同义词扩展匹配;`match()` 仅用**确定性关键词+同义词**匹配。**已停用 LLM 语义匹配**(它会把同题号但机制不相干的卡乱配,损"有据可查")。
+- `hia_screen.py` — 引擎:3 段 DeepSeek 流水线(行动抽取→多视角路径展开→完整性批判)+ 确定性聚合到 10 题 + 初筛表 docx。坑:DeepSeek json_object 偶发吐空白,需"加扰动重试"(`_chat_json` 已处理)。提示词已:去重复/去政策元评论/严标强度。`_norm_pathways` 归一化 chain:字符串别按"字"拆、元素内 `→` 拆成独立节点、**节点去重**(LLM 偶让链条绕回先前节点)。
+- `hia_evidence.py` — 证据库(**两轨·89 张卡**)。`card_kind`:**因果**(WHO/文献,锁题号·支撑「→健康结果」)/ **基准**(国标 GB/GBZ/GB·按来源等级自动判,跨题号·按暴露/环节命中,作限值与管控基准)。`match()` 双轨各最多 2 张,输出带 `kind`;`source_tier` 来源分级(认 GB/GBZ/GB/T→「国家标准」);`_STOP_KEYS` 停用表;`_SYN_GROUPS`(24 组)同义词扩展。**仅确定性关键词+同义词匹配,已停用 LLM 语义匹配**(会乱配,损"有据可查")。国标卡 31 张(空气/噪声/排放/固废危废/食品/职业/电磁/适老/交通…),来源只写「标准名 标准号. 发布机构.」**不附 URL**,note 写 PDF/官方**核实**的关键限值(如 GB3095-2026 PM2.5 年均 25/日均 50 μg/m³)。
 - `cases.py` — 案例/项目库(文件级 `cases/<案例码>.json` + 政策原文 `cases/<案例码>.<ext>`),单人与协同共用。字段含 `source`(单人初筛/专家协同)、`status`(评审中/已定稿/已归档/作废)、`reference`(参考案例)、`adopted_ids`(单人当时采纳的影响路径)。`consensus_view` 逐题算共识/分歧;`doc_path` 取原文;`save_single_case` 单人一键落库(直接已定稿,判定存 `consensus`);`set_status`/`set_reference`/`delete_case`/`adopted_pathways`/`list_reference` 供项目管理与案例参考用。`app_nicegui._case_export_payload`+`adopted_pathways` 统一供台账/案例参考重新导出 docx。
 - `feedback.py` — 专家反馈留痕(`feedback/feedback_log.jsonl`)+ `summarize`;`eval/feedback_report.py` 出回流报告。
 - `theme.py` 主题/品牌;`views/screen.py`、`app.py`、`auth.py` 是**旧 Streamlit 版**(保留,部署不用)。
 - `eval/` 批测:`run_eval.py`(支持目录参数)、`make_*_policies.py`(合成/真实测试政策)、`REVIEW_GUIDE.md`。
 - `docs/` 取证与部署:`standards_master_list.md`(国标主清单)、`gb_standards_shoplist.md`、`kb_expansion_worklist.md`、`DEPLOY.md`、`DEPLOY_HTTPS.md`。
 
+## 本会话新增(2026-06-14 第二段:UI 大改 + 两轨证据库 + 国标库)
+- **健康影响初筛 UI(`/screen`)重做**:10 题从纵向下拉改为**横向选项卡 + 单维度面板**(吸顶、彩色=判断、上一/下一)、顶部步骤条、上传区分析后自动收起、红绿灯汇总。每条影响渲成**路径节点流**(📄政策原文引文 → 环节 → 健康结果,末端按方向红/绿),整条 hover 高亮;`_path_flow_html`/`_ARROW_RE` 拆箭头+去重。
+- **角色感**:发起方(卫健委)= `/new`「发起专家组协同评估」、`/panel` 经办台;受邀专家 `/review` 无平台导航 + 「您的任务三步」+ 经办台「📋 复制完整邀请」(JS 取 `window.location.origin`)。
+- **评估地图(按钮「健康影响评估因果机制路径」)**:几经折腾(mermaid 连线树→分列 subgraph→pan/zoom 全失败/布局不可控)→ 最终落到**确定性方案**:弹窗里**按 HIA 维度分组、每行一条横向路径流**(纯 HTML,稳定不崩),点维度标题跳选项卡。**结论:mermaid 自动排版对不同政策时好时崩、pan/zoom(svg-pan-zoom/自写)都不稳,已弃用**(`build_mermaid` 留作死代码)。
+- **两轨证据库**:见上 `hia_evidence.py`。显示端 `render_evidence` 分两块——📚 健康因果依据(WHO)/ 📐 相关国家标准(暴露限值·**非因果证据**);`prov_of` 健康端徽标**只看因果轨**。
+- **国标库批量入库**:本地 58 份 GB/HJ PDF(`E:/projects/26.06.13国家标准清单`,未入库)→ pypdf 抽到 `.std_text/`(gitignored)→ 三态(36 可读/10 CID 乱码/13 扫描)。可读的逐份读正文抽限值建卡(31 张已入)。`docs/gb_kb_worklist.md` 跟踪、`docs/gb_extract_digest.md` 抽取汇总。剩 23 份(乱码+扫描)按 GB3095 那样**联网核实**现行版限值,后续小批补。
+
 ## 关键决策 / 铁律
 - **证据可靠:精准 > 召回**;匹配不到宁标「证据待补」也不贴错卡(贴错比没有更糟)。
-- **绝不臆造来源**(URL/标准号/原文摘录)——加卡前必须联网核实**现行版**(踩过 GB 3095-2012 已废、换 2026 版的坑)。
+- **两轨**:WHO/文献=因果(锁题号·健康端);国标=基准(跨题号·暴露端·带核实限值),**不让国标冒充因果**。
+- **绝不臆造来源**(URL/标准号/原文摘录/限值数字)——加卡前必须联网或从 PDF **核实现行版**(踩过 GB 3095-2012 已废、换 2026 版的坑);国标卡只写「标准号+发布机构」不附 URL。
 - WHO 证据只支撑链条「最后一段→健康结果」;中间政策/行为/暴露环节需结合文件+本地判断(界面已注明)。
 - 文案面向**零基础政务用户**:自解释、不缩略;强制浅色主题。
 - 召回主要杠杆 = 卡片关键词覆盖 AI 常用**同义措辞**(`_SYN_GROUPS`)。

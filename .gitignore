@@ -23,3 +23,4 @@ cases/
 # 本地开发临时文件
 .claude/
 .ledger_dev.log
+.std_text/
