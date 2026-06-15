@@ -24,3 +24,5 @@ cases/
 .claude/
 .ledger_dev.log
 .std_text/
+.run.log
+.smoketest.py

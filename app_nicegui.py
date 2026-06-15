@@ -15,6 +15,7 @@
 现有 Streamlit 版(app.py)不受影响,二者各自独立。
 """
 import json
+import difflib
 import os
 import re
 from datetime import date
@@ -66,6 +67,9 @@ ANSWER_FULL = {"是": "该维度健康影响需重点关注",
                "不知道": "该维度健康影响尚不确定、建议进一步评估",
                "否": "暂未发现明显健康影响"}
 ANSWER_COLOR = {"是": "#C62828", "不知道": "#B07A00", "否": "#1B6B3A"}
+# 顶部统计卡配色(规范 token,大数字与左侧色条统一):需要关注=红/尚不确定=橙/暂未发现=绿
+STAT_COLOR = {"是": "var(--hia-danger-600)", "不知道": "var(--hia-grade-600)",
+              "否": "var(--hia-benefit-600)"}
 # 机制证据强度(AI 对该条机制成立的把握),完整表述
 STRENGTH_LABEL = {"强": "机制证据较充分", "中": "机制证据中等", "推测": "尚属机制推测"}
 STRENGTH_COLOR = {"强": "#C62828", "中": "#E07B39", "推测": "#9AA0A6"}
@@ -204,6 +208,11 @@ def humanize_summary(text, actions):
 _ARROW_RE = re.compile(r"\s*(?:→|—>|->|⟶|=>|⇒)\s*")
 
 
+def _norm_cmp(s):
+    """归一化用于相似度比较:去空白与常见标点/书名号,便于判断两段文字是否近乎一致。"""
+    return re.sub(r"[\s，。、；：,.;:\"'“”‘’《》«»〈〉「」（）()\[\]【】·…—-]+", "", s or "")
+
+
 def _path_flow_html(p, actions):
     """把一条影响路径渲成节点流 HTML:📄原文引用 → 行动/环节 → 健康结果(仅末节点按风险/效益着色)。
     注:chain 元素内部若自带 → 箭头,拆成独立节点,保证流程连贯。"""
@@ -221,6 +230,13 @@ def _path_flow_html(p, actions):
     nodes = []
     origin = act_ev.get(p.get("action_id"), "") or (
         p.get("evidence", "") if p.get("status") == "文档支持" else "")
+    # 去首环节重复:原文框已逐字摘录政策原文,若第一个中间环节与之近乎一字不差,
+    # 说明把原文又抄了一遍——丢弃它,让第一个中间环节落到提炼后的机制节点(仍保留≥1 个中间环节)。
+    if origin and len(steps) >= 2:
+        o, s0 = _norm_cmp(origin), _norm_cmp(steps[0])
+        if s0 and (s0 in o or o in s0 or
+                   difflib.SequenceMatcher(None, o, s0).ratio() > 0.8):
+            steps = steps[1:]
     if origin:
         nodes.append(f'<span class="hia-node origin" title="引自政策原文(逐字摘录)">'
                      f'📄 “{_esc(origin)}”</span>')
@@ -228,10 +244,9 @@ def _path_flow_html(p, actions):
     for i, step in enumerate(steps):
         last = (i == len(steps) - 1)
         cls = "hia-node"
-        if last:                                   # 末端=健康结果:实色块 + 方向箭头收尾
-            cls += " outcome-risk" if risk else " outcome-benefit"
-            tip = ("↓ " if risk else "↑ ") + _esc(step)
-            nodes.append(f'<span class="{cls}">{tip}</span>')
+        if last:                                   # 末端=健康结果:实色块(益绿/害红)。好坏靠底色+染色连接箭头,
+            cls += " outcome-risk" if risk else " outcome-benefit"   # 框内不再加 ↑/↓——避免与"降低/增加"等动词打架
+            nodes.append(f'<span class="{cls}">{_esc(step)}</span>')
         else:
             nodes.append(f'<span class="hia-node">{_esc(step)}</span>')
     # 普通箭头灰色;指向最终结果的那一支染成对应语义色(规范第 4 节)
@@ -309,15 +324,102 @@ def prov_of(p):
             GREEN_DEEP if done else "#B07A00")
 
 
+# —— 依据区块:统一的小标题锚点 + 已核实徽章 + 来源条目卡(规范第 3/5 节)——
+_SRC_URL_RE = re.compile(r"(https?://\S+)")
+# 形如「PM2.5 年均 25、日均 50」:污染物 + 年均值 + 日均值(污染物名含下标/小数)
+_LIMIT_ITEM_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9.₀-₉²³．]*)\s*年均\s*([0-9.]+)[^日]*?日均\s*([0-9.]+)")
+# 浓度单位(从 note 原文里自动识别,不写死;µ=U+00B5 / μ=U+03BC 都认,³ 或 3 都认)
+_UNIT_RE = re.compile(r"[µμ]g/m[³3]|mg/m[³3]|mg/kg|mg/L|ng/m[³3]")
+
+
+def _split_source(src):
+    """把一条来源串拆成 (标题, URL)。来源串形如「标准名 标准号. 发布机构. https://…」。"""
+    s = str(src).strip()
+    m = _SRC_URL_RE.search(s)
+    url = m.group(1).rstrip("。.，,；;)]") if m else ""
+    title = (s[:m.start()] if m else s).strip().rstrip("。.，,；; ").strip()
+    return title or s, url
+
+
+def _verified_chip(text, kind="ok"):
+    """统一的「已核实/认证」标记:与卡片顶部徽章同一视觉语言(实底软块·圆角6·12px·400)。"""
+    bg, fg = (("var(--hia-grade-50)", "var(--hia-grade-800)") if kind == "warn"
+              else ("var(--hia-benefit-50)", "var(--hia-benefit-800)"))
+    return (f'<span style="display:inline-flex;align-items:center;padding:4px 10px;'
+            f'border-radius:6px;font-size:12px;font-weight:400;'
+            f'background:{bg};color:{fg};">{_esc(text)}</span>')
+
+
+def _ev_header(icon, title, accent, sub, hero=False):
+    """三类依据的区块小标题锚点:图标 + 标题(左侧色条),副说明小字。hero=核心(更大更醒目)。"""
+    tag = ('<span style="font-size:11px;font-weight:400;color:#fff;'
+           f'background:{accent};border-radius:4px;padding:1px 7px;margin-left:2px;">核心</span>'
+           ) if hero else ""
+    fs = "15px" if hero else "13px"
+    return (
+        f'<div style="margin-top:{"12px" if hero else "9px"};">'
+        f'<div style="display:flex;align-items:center;gap:7px;font-size:{fs};font-weight:500;'
+        f'color:{accent};border-left:3px solid {accent};padding-left:9px;line-height:1.3;">'
+        f'<span>{icon}</span><span>{_esc(title)}</span>{tag}</div>'
+        f'<div style="font-size:11.5px;font-weight:400;color:var(--hia-neutral-500);'
+        f'padding-left:12px;margin-top:3px;line-height:1.45;">{sub}</div></div>')
+
+
+def _limit_table_html(note):
+    """密集数值要点(尤其国标 PM2.5/PM10/NO₂/SO₂ 年/日均限值)渲成小表:污染物/年均/日均。
+    解析不出≥2 条则返回空串,由调用方退回纯文字。"""
+    items = _LIMIT_ITEM_RE.findall(note or "")
+    if len(items) < 2:
+        return ""
+    um = _UNIT_RE.search(note or "")              # 单位从原文自动取,识别不出则不标(不臆造)
+    unit = (f'<span style="font-weight:400;font-size:10.5px;'
+            f'color:var(--hia-neutral-500);">（{_esc(um.group(0))}）</span>') if um else ""
+    bd = "border-top:1px solid var(--hia-border);"
+    rows = "".join(
+        f'<tr><td style="padding:3px 12px 3px 0;{bd}">{_esc(n)}</td>'
+        f'<td style="padding:3px 12px;{bd}text-align:right;">{_esc(y)}</td>'
+        f'<td style="padding:3px 0 3px 12px;{bd}text-align:right;">{_esc(d)}</td></tr>'
+        for n, y, d in items)
+    return (
+        '<table style="border-collapse:collapse;font-size:12px;margin:4px 0 2px;'
+        'color:var(--hia-neutral-700);">'
+        '<thead><tr style="color:var(--hia-neutral-500);font-weight:500;">'
+        '<th style="padding:0 12px 3px 0;text-align:left;font-weight:500;">污染物</th>'
+        f'<th style="padding:0 12px 3px;text-align:right;font-weight:500;">年均{unit}</th>'
+        f'<th style="padding:0 0 3px 12px;text-align:right;font-weight:500;">日均{unit}</th>'
+        '</tr></thead><tbody>' + rows + '</tbody></table>')
+
+
 def _render_source_card(c):
-    badge = (soft_chip(c.get("tier", "WHO 资料"), GREEN_DEEP) + " "
-             + (soft_chip("已核实", GREEN_DEEP) if c.get("status") != "todo"
-                else soft_chip("待补强", "#B07A00")))
-    ui.html(f'<div style="font-size:.82rem;margin-top:2px;">{badge}</div>')
-    ui.markdown("　来源:" + "；".join(c["sources"])).classes("text-sm")
+    """一条来源 = 一张缩进小卡:已核实徽章 + 加粗标题 +「查看原文 ↗」+ 要点(小字/小表)。"""
+    verified = c.get("status") != "todo"
+    chips = (_verified_chip(c.get("tier", "WHO 资料"), "ok")
+             + _verified_chip("已核实" if verified else "待补强",
+                              "ok" if verified else "warn"))
+    body = ""
+    for src in c.get("sources", []):
+        title, url = _split_source(src)
+        link = (f'<a href="{_esc(url)}" target="_blank" rel="noopener" '
+                f'style="color:var(--hia-source-600);text-decoration:none;white-space:nowrap;'
+                f'margin-left:8px;font-size:12px;">查看原文 ↗</a>') if url else ""
+        body += (f'<div style="font-size:12.5px;font-weight:500;color:var(--hia-neutral-700);'
+                 f'line-height:1.5;margin-top:2px;">{_esc(title)}{link}</div>')
+    note_html = ""
     if c.get("note"):
-        ui.label("　要点(概括,以原文链接为准):" + c["note"]).classes("text-sm").style(
-            "color:#5a7a66;")
+        tbl = _limit_table_html(c["note"])
+        if tbl:
+            note_html = ('<div style="font-size:11.5px;color:var(--hia-neutral-500);'
+                         'margin-top:4px;">要点(概括,以原文为准):</div>' + tbl)
+        else:
+            note_html = (f'<div style="font-size:11.5px;color:var(--hia-neutral-500);'
+                         f'margin-top:4px;line-height:1.5;">要点(概括,以原文链接为准):'
+                         f'{_esc(c["note"])}</div>')
+    ui.html(
+        f'<div style="border:0.5px solid var(--hia-border);border-radius:8px;'
+        f'background:var(--hia-surface);padding:8px 11px;margin:6px 0 6px 12px;">'
+        f'<div style="display:flex;gap:6px;flex-wrap:wrap;">{chips}</div>'
+        f'{body}{note_html}</div>')
 
 
 def render_evidence(cards, last_node="健康结果"):
@@ -325,20 +427,26 @@ def render_evidence(cards, last_node="健康结果"):
     causal = [c for c in (cards or []) if c.get("kind", "因果") == "因果"]
     bench = [c for c in (cards or []) if c.get("kind") == "基准"]
     if causal:
-        ui.html(f'<div style="font-size:.85rem;color:#5a7a66;margin-top:2px;">'
-                f'📚 <b>健康因果依据</b>:下列来源支撑本条<b>最后一段「→ {_esc(last_node)}」的健康影响</b>;'
-                f'链条前段的政策/行为/暴露环节,请结合上传文件与本地情况判断。</div>')
+        ui.html(_ev_header(
+            "📚", "健康因果依据", "var(--hia-benefit-600)",
+            f'下列来源支撑本条<b style="font-weight:500;">最后一段「→ {_esc(last_node)}」的健康影响</b>;'
+            '链条前段的政策/行为/暴露环节,请结合上传文件与本地情况判断。', hero=True))
         for c in causal:
             _render_source_card(c)
     else:
-        ui.html('<div style="font-size:.85rem;background:#FFF7E6;border-left:3px solid #B07A00;'
-                'padding:5px 9px;border-radius:4px;">⚠ <b>健康端因果证据待补</b>:'
-                '暂无 WHO/文献支撑这条的健康影响,需专家补证后再采纳。</div>')
+        ui.html(_ev_header(
+            "📚", "健康因果依据", "var(--hia-benefit-600)",
+            "这条的健康影响目前缺权威因果证据。", hero=True)
+            + '<div style="font-size:12.5px;background:var(--hia-grade-50);'
+              'border-left:3px solid var(--hia-grade-600);padding:6px 10px;border-radius:4px;'
+              'margin:5px 0 2px 12px;color:var(--hia-grade-800);line-height:1.5;">'
+              '⚠ <b style="font-weight:500;">健康端因果证据待补</b>:'
+              '暂无 WHO/文献支撑这条的健康影响,需专家补证后再采纳。</div>')
     if bench:
-        ui.html('<div style="font-size:.85rem;color:#1c4e80;margin-top:5px;background:#EAF1FB;'
-                'border-left:3px solid #2E6DB4;padding:5px 9px;border-radius:4px;">'
-                '📐 <b>相关国家标准(暴露/环境限值与管控基准)</b>:以下为本路径涉及暴露/环节的国家标准,'
-                '<b>非因果证据</b>,用作评估基准、达标判据与改善建议依据。</div>')
+        ui.html(_ev_header(
+            "📐", "相关国家标准", "var(--hia-neutral-700)",
+            '以下为本路径涉及暴露/环节的国家标准,<b style="font-weight:500;">非因果证据</b>,'
+            '用作评估基准、达标判据与改善建议依据。'))
         for c in bench:
             _render_source_card(c)
 
@@ -477,6 +585,7 @@ def screen():
                 return
             n.dismiss(); analyze_btn.enable()
             st["res"], st["docinfo"] = res, info
+            st["name"] = hs.guess_title(text, fallback=st.get("name", ""))  # 用正文标题自动填充评估对象名
             adopt.clear(); ans.clear(); note.clear(); sysans.clear()
             for p in res["pathways"]:
                 adopt[p["id"]] = _adopt_default(p)
@@ -507,9 +616,9 @@ def screen():
         with ui.row().classes("w-full items-stretch gap-3"):
             for a in ANSWERS:
                 with ui.card().classes("flex-grow items-center").style(
-                        f"border-left:4px solid {ANSWER_COLOR[a]};padding:8px;"):
+                        f"border-left:4px solid {STAT_COLOR[a]};padding:8px;"):
                     ui.label(str(cnt[a])).style(
-                        f"font-size:1.5rem;font-weight:700;color:{ANSWER_COLOR[a]};")
+                        f"font-size:1.5rem;font-weight:500;color:{STAT_COLOR[a]};")
                     ui.label(ANSWER_LABEL[a]).classes("text-xs text-grey")
 
     @ui.refreshable
@@ -567,19 +676,30 @@ def screen():
                 ui.label("主要影响人群:" + p["population"]).classes("text-xs")
             ui.label("证据强度评估:" + STRENGTH_LABEL.get(p["strength"], p["strength"])
                      + "　|　依据来源:" + STATUS_LABEL.get(p["status"], p["status"])).classes("text-xs")
-            # 文件原句依据(锚住链路起点)
+            # 文件原句依据(锚住链路起点):蓝=政策来源,与影响链起点同色
             if p.get("status") == "文档支持" and p.get("evidence"):
-                ui.html(f'<div style="font-size:.78rem;background:#F1F8F4;'
-                        f'border-left:3px solid {GREEN};padding:4px 8px;border-radius:4px;">'
-                        f'📄 <b>文件原文依据</b>(对应链条最前段):{p["evidence"]}</div>')
+                ui.html(
+                    _ev_header("📄", "文件原文依据", "var(--hia-source-600)",
+                               "下面这段逐字引自上传的政策文件,对应因果链最前段。")
+                    + f'<div style="font-size:12.5px;background:var(--hia-source-50);'
+                      f'border-radius:6px;padding:7px 11px;margin:5px 0 2px 12px;'
+                      f'color:var(--hia-source-800);line-height:1.55;">'
+                      f'“{_esc(p["evidence"])}”</div>')
             # 两轨依据:健康因果(WHO/文献) + 相关国家标准(暴露限值/管控基准)
             render_evidence(cards, p["chain"][-1] if p.get("chain") else "健康结果")
             # —— 专家反馈(可选):标出这条的问题,用于改进系统 ——
             pid = p["id"]
             fb.setdefault(pid, {"flag": "", "note": ""})
             ui.separator()
-            with ui.row().classes("items-center gap-2 w-full no-wrap"):
-                ui.label("🚩 专家反馈:").classes("text-xs").style("color:#888;")
+            ui.html(
+                '<div style="display:flex;align-items:center;gap:7px;font-size:13px;'
+                'font-weight:500;color:var(--hia-danger-600);border-left:3px solid '
+                'var(--hia-danger-400);padding-left:9px;margin-top:2px;">'
+                '<span>🚩</span><span>专家反馈</span>'
+                '<span style="font-size:11.5px;font-weight:400;color:var(--hia-neutral-500);">'
+                '发现机制不成立 / 来源错配?标一下,直接用于改进系统</span></div>')
+            with ui.row().classes("items-center gap-2 w-full no-wrap").style(
+                    "padding-left:12px;margin-top:4px;"):
                 flag_sel = ui.select(["", *fb_engine.FLAGS], value=fb[pid]["flag"]).props(
                     "dense options-dense").style("min-width:130px;font-size:.78rem;")
                 flag_sel.on_value_change(lambda e, i=pid: fb[i].__setitem__("flag", e.value or ""))
@@ -608,7 +728,7 @@ def screen():
         with ui.element("div").classes("w-full").style(
                 "position:sticky;top:0;z-index:50;background:#fff;padding:6px 0;"
                 "border-bottom:1px solid #EEF4F0;box-shadow:0 4px 8px -6px rgba(0,0,0,.12);"):
-            with ui.row().classes("w-full gap-1").style("flex-wrap:wrap;"):
+            with ui.row().classes("w-full gap-1").style("flex-wrap:wrap;align-items:stretch;"):
                 for q in range(1, 11):
                     a = ans.get(q, sysans.get(q, "否"))
                     on = sel["q"] == q
@@ -619,6 +739,7 @@ def screen():
                         cell = ui.element("div").classes("cursor-pointer").style(
                             f"flex:1 1 84px;min-width:84px;border:none;"
                             f"border-radius:var(--hia-radius-md);padding:6px 8px;text-align:center;"
+                            f"display:flex;flex-direction:column;justify-content:center;"
                             f"background:{TAB_ACTIVE_BG[a]};box-shadow:0 2px 6px -2px rgba(0,0,0,.30);")
                         with cell:
                             ui.html(
@@ -626,21 +747,19 @@ def screen():
                                 f'line-height:1.25;">{q} {hs.SHORT_Q[q-1]}</div>'
                                 f'<div style="font-size:11px;font-weight:400;'
                                 f'color:{TAB_ACTIVE_SUB[a]};">{sub}</div>')
-                    else:                                        # 未选中态:细灰边 + 状态圆点 + 中性字
+                    else:                                        # 未选中态:细灰边 + 状态圆点 + 编号标题(单行);副信息进 hover
                         cell = ui.element("div").classes("cursor-pointer").style(
                             f"flex:1 1 84px;min-width:84px;border:0.5px solid var(--hia-border);"
                             f"border-radius:var(--hia-radius-md);padding:6px 8px;"
-                            f"background:var(--hia-surface);display:flex;flex-direction:column;gap:2px;")
+                            f"background:var(--hia-surface);display:flex;align-items:center;gap:6px;")
+                        cell.props(f'title="{sub}"')
                         with cell:
                             ui.html(
-                                f'<div style="display:flex;align-items:center;gap:6px;">'
                                 f'<span style="width:7px;height:7px;border-radius:50%;flex:none;'
                                 f'background:{TAB_DOT[a]};"></span>'
                                 f'<span style="font-size:13px;font-weight:500;'
                                 f'color:var(--hia-neutral-700);line-height:1.25;">'
-                                f'{q} {hs.SHORT_Q[q-1]}</span></div>'
-                                f'<div style="font-size:11px;font-weight:400;'
-                                f'color:var(--hia-neutral-500);padding-left:13px;">{sub}</div>')
+                                f'{q} {hs.SHORT_Q[q-1]}</span>')
                     cell.on("click", lambda q=q: _select_q(q))
 
     # ===== 选中方面的内容面板 =====
@@ -754,16 +873,22 @@ def screen():
         ui.label("第 4 步 · 得出结论并下载初筛表").classes("text-base font-medium q-mt-md")
         with ui.row().classes("items-center gap-3 w-full"):
             ui.label("总体影响程度:").classes("text-sm")
-            lv_default = res.get("suggest_level") if res.get("suggest_level") in (
-                "很小", "轻度", "重大") else "轻度"
-            level_radio = ui.radio(["很小", "轻度", "重大"], value=lv_default).props(
-                "inline dense")
+            # 不预选——关系到结论严肃性,由专家主动选择,避免不经意提交偏重判断;AI 初判仅作提示。
+            level_radio = ui.radio(["很小", "轻度", "重大"], value=None).props("inline dense")
+            ai_lv = res.get("suggest_level") if res.get("suggest_level") in (
+                "很小", "轻度", "重大") else ""
+            if ai_lv:
+                ui.label(f"系统初判:{ai_lv}（仅供参考，请专家确认）").classes("text-xs").style(
+                    "color:var(--hia-neutral-500);")
         with ui.row().classes("w-full items-center"):
             name_in = ui.input("评估对象名称(用于初筛表标题,可改)",
                                value=st.get("name", "")).classes("flex-grow")
         opinion_in = ui.textarea("评估专家组意见(可选)").classes("w-full")
 
         def do_download():
+            if not level_radio.value:
+                ui.notify("请先选择「总体影响程度」再导出初筛表。", type="warning")
+                return
             header = {"name": name_in.value, "category": "政府发布/实施",
                       "dept": "", "submitter": "", "phone": "",
                       "screen_date": str(date.today()),
@@ -778,6 +903,9 @@ def screen():
                         f"健康影响评估初筛表_{name_in.value or '评估对象'}.docx")
 
         def do_save_ledger():
+            if not level_radio.value:
+                ui.notify("请先选择「总体影响程度」再存入项目管理。", type="warning")
+                return
             items_out = [{"q": q, "answer": ans.get(q, sysans.get(q, "否")),
                           "note": note.get(q, "")} for q in range(1, 11)]
             adopted_ids = [p["id"] for p in allp if adopt.get(p["id"])]
@@ -802,8 +930,9 @@ def screen():
         ui.separator()
         ui.label("第 5 步 · 提交专家反馈(可选,帮助改进系统)").classes(
             "text-base font-medium q-mt-md")
-        ui.label("您在各条影响处标记的问题、采纳/排除与判定,将匿名留痕,用于改进路径推断与证据库。").classes(
-            "text-xs text-grey")
+        ui.label("您的采纳/排除与判定会直接用于改进系统的路径推断与证据库——欢迎花一分钟反馈。").style(
+            "font-size:13px;font-weight:500;color:var(--hia-neutral-700);")
+        ui.label("（您在各条影响处的标记将匿名留痕,不含个人信息。）").classes("text-xs text-grey")
         expert_in = ui.input("专家署名(可选)").classes("w-full")
 
         def do_feedback():
@@ -868,7 +997,7 @@ _FLOW_CSS = (
     "background:var(--hia-surface-muted);padding:14px;border-radius:var(--hia-radius-lg);}"
     ".hia-node{display:inline-flex;align-items:center;padding:8px 12px;"
     "border-radius:var(--hia-radius-md);font-size:12px;font-weight:400;"
-    "background:var(--hia-surface);border:0.5px solid var(--hia-border);"
+    "background:#EFEDE6;border:none;"
     "color:var(--hia-neutral-500);}"
     ".hia-node.origin{background:var(--hia-source-50);border:none;"
     "color:var(--hia-source-800);max-width:340px;font-style:italic;}"
