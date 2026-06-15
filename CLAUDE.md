@@ -100,6 +100,13 @@
 - **本机冒烟测试** `.smoketest.py`(已 gitignore):**monkeypatch `nicegui.ui.run` 为空操作**后再 `import app_nicegui`,即可不绑 8502 直接调用已上线助手(无重复逻辑);跑引擎→真实卡片→过 `_render_source_card/_limit_table_html` 等,输出静态预览 `Downloads/hia_evidence_preview.html`。节能减排样例:10 行动/10 路径、是2否8、9 张国标卡渲出限值表(含单位)。
 - ⚠ **`ui.run(reload=False)` 无热重载**:改任何代码后必须杀 8502 进程 + 重启才生效(重启清会话,需重传 PDF)。
 
+## 本会话新增(2026-06-15 第三段:批量体检 + 溯源高亮 + 证据库自助管理)
+三个新功能,均在 `app_nicegui.py`(引擎/数据接口在 `hia_evidence.py`),复用既有 `hs.extract_text/analyze/compute_items` 管线与色彩 token,未动判定逻辑。
+- **批量政策体检 / 监管看板** `/batch`(首页第 2 卡 + 顶部导航「🩺 批量体检」,`require_app_login`):多份上传 → 逐份跑 `analyze`(进度条、单份失败不中断)→ 看板=① 指标卡 ② **政策×10 健康维度热力图**(复用台账色带:红需关注/黄不确定/绿暂无)③ **监管视角**各维度被触及占比条。每份可「存入项目管理」(`save_single_case` 后 `set_status` 改**评审中**,不直接定稿,opinion 标"AI 自动初筛待核定")。数据源=**本批上传**(看板汇总未并入台账,留作后续扩展)。`ui.upload(multiple=True)`。
+- **政策原文溯源高亮**(强化"有据可查/可审计"):每条影响「依据/详情」里加「🔎 在原文中定位这段依据」→ 弹窗显示政策原文全文、把该条逐字摘录**蓝高亮**(政策来源色)并自动滚动到位。`_locate_quote`(`_collapse_for_match` 去空白+`«»→《》`+**NFKC 全角→半角**;精确 find → 近似:最长公共片段为锚点按引文长度框出,标「近似·请核对」;定位不到→不臆造高亮、提示人工核对)。`/screen` 存 `st["text"]`;`render_pathway_ro(p, actions, doc_text)` 加 `doc_text` 参;`/review`、`/reference` 用 `_case_doc_text(case)`(从随附原文重抽)。`_path_flow_html` 抽出 `_origin_quote(p, actions)` 共用。
+- **证据库自助管理** `/evidence`(首页页脚「📖 证据库管理」入口,`require_app_login`):非程序员也能增/改/删证据卡。`hia_evidence.py` 加**运行时覆盖层**:内置卡 = 源码 `_BUILTIN_CARDS`(只读基线);用户卡存 `evidence_user.json`、`load_user_cards()` 启动并入 `CARDS`(`CARDS[:]=builtin+user` 原地替换保引用)、即时参与 `match()`;`add/update/delete/list_user_cards`。页面:大白话引导(术语改「权威研究证据/国家标准限值」、题号→健康方面)、每字段带示例、「填入示例」一键样例、效果预览("保存后 AI 遇到含『…』时会把这张卡作为〔X〕依据列出")、内置库查重检索、导出 JSON。`kind/tier` 仍由 `card_kind/card_tier` 自动判定(含 GB→基准)。
+- **坑/约定**:`evidence_user.json` 已 **gitignore**(防 server 端 `git pull` 冲突;用界面「导出」备份或合并回 `hia_evidence.py`);`_SYN_GROUPS` 同义词仍在代码里(卡片 keys 可直接多写同义词,够用)。`.claude/launch.json`(预览用,gitignore)。验证:浏览器实测三页 + 引擎单测(溯源精确/近似/全角/定位不到;覆盖层增改删/合并/匹配)。
+
 ## 域名 / 备案进展(2026-06-14)
 - 域名 `tjhealthycitylab.com` 已注册;**子域名 `hia.tjhealthycitylab.com` → 阿里云 ECS `106.15.57.87`**(A 记录已配,安全组放行 8502)。
 - **备案进行中**:阿里云首次备案,**主体=单位「上海灵犀智屿科技有限公司」**(注意:单位备案要求域名持有者=该单位,个人实名须先过户);网站名取公司简称「灵犀智屿科技」避开"健康/医疗"前置审批词。

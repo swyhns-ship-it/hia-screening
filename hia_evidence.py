@@ -15,6 +15,9 @@ HIA 机制路径支撑证据卡片（WHO 官方来源）
 app 接口（被 hia_screen.py / views 调用）：match(pathway) / annotate(pathways) / gaps(pathways)。
 匹配按"题号一致 + 关键词双向命中因果链"；status='todo' 的卡片仍挂来源,显示端标"待补强"。
 """
+import json
+import os
+import uuid
 
 CARDS = [
     # ===================== Q1 传染病与感染性疾病 =====================
@@ -1177,6 +1180,88 @@ def gaps(pathways):
         out.append({"q": q, "chain": list(chain)})
     out.sort(key=lambda g: g["q"])
     return out
+
+
+# ----------------------- 用户自助维护的证据卡(运行时覆盖层) -----------------------
+# 内置卡写在本文件源码里(权威、随仓库)。经「证据库管理」界面新增的卡存入 evidence_user.json,
+# 运行时并入 CARDS、即时参与匹配。铁律不变:只录入已核实的现行标准/权威来源,不臆造编号/限值/URL。
+_USER_CARDS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "evidence_user.json")
+_BUILTIN_CARDS = list(CARDS)          # 源码内置卡(只读基线)
+USER_CARDS = []                       # 用户卡(可增删改)
+
+
+def _rebuild_cards():
+    CARDS[:] = _BUILTIN_CARDS + USER_CARDS   # 原地替换,保持 CARDS 列表对象引用不变
+
+
+def _new_card_id():
+    return "u" + uuid.uuid4().hex[:8]
+
+
+def _norm_user_card(card):
+    """规整一张用户卡:keys(list)/q(Q#)/sources(list) 必填,note/status/kind 可选。"""
+    keys = [k.strip() for k in (card.get("keys") or []) if k and k.strip()]
+    sources = [s.strip() for s in (card.get("sources") or []) if s and s.strip()]
+    out = {"keys": keys, "q": (card.get("q") or "").strip(),
+           "note": (card.get("note") or "").strip(), "sources": sources,
+           "status": "todo" if card.get("status") == "todo" else "done",
+           "user": True, "id": card.get("id") or _new_card_id()}
+    if card.get("kind") in ("因果", "基准"):
+        out["kind"] = card["kind"]
+    return out
+
+
+def _save_user_cards():
+    with open(_USER_CARDS_PATH, "w", encoding="utf-8") as f:
+        json.dump(USER_CARDS, f, ensure_ascii=False, indent=2)
+
+
+def load_user_cards():
+    """从 evidence_user.json 载入用户卡并并入 CARDS(启动时调用一次)。"""
+    global USER_CARDS
+    try:
+        with open(_USER_CARDS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        USER_CARDS = [_norm_user_card(c) for c in data
+                      if isinstance(c, dict) and c.get("keys") and c.get("q")]
+    except (FileNotFoundError, ValueError, OSError):
+        USER_CARDS = []
+    _rebuild_cards()
+
+
+def list_user_cards():
+    return list(USER_CARDS)
+
+
+def add_user_card(card):
+    c = _norm_user_card(card)
+    USER_CARDS.append(c)
+    _save_user_cards()
+    _rebuild_cards()
+    return c
+
+
+def update_user_card(cid, card):
+    for i, c in enumerate(USER_CARDS):
+        if c.get("id") == cid:
+            USER_CARDS[i] = _norm_user_card({**card, "id": cid})
+            _save_user_cards()
+            _rebuild_cards()
+            return USER_CARDS[i]
+    return None
+
+
+def delete_user_card(cid):
+    global USER_CARDS
+    before = len(USER_CARDS)
+    USER_CARDS = [c for c in USER_CARDS if c.get("id") != cid]
+    _save_user_cards()
+    _rebuild_cards()
+    return len(USER_CARDS) < before
+
+
+load_user_cards()                     # 启动时并入用户卡
 
 
 if __name__ == "__main__":

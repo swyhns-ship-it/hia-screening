@@ -18,6 +18,7 @@ import json
 import difflib
 import os
 import re
+import unicodedata
 from datetime import date
 
 from nicegui import ui, run, app
@@ -216,7 +217,6 @@ def _norm_cmp(s):
 def _path_flow_html(p, actions):
     """把一条影响路径渲成节点流 HTML:📄原文引用 → 行动/环节 → 健康结果(仅末节点按风险/效益着色)。
     注:chain 元素内部若自带 → 箭头,拆成独立节点,保证流程连贯。"""
-    act_ev = {a["id"]: (a.get("evidence") or "").strip() for a in (actions or [])}
     raw = p.get("chain") or []
     if isinstance(raw, str):                      # 防御:字符串别按"字"拆开
         raw = [raw]
@@ -228,8 +228,7 @@ def _path_flow_html(p, actions):
                 _seen.add(part)
                 steps.append(part)
     nodes = []
-    origin = act_ev.get(p.get("action_id"), "") or (
-        p.get("evidence", "") if p.get("status") == "文档支持" else "")
+    origin = _origin_quote(p, actions)
     # 去首环节重复:原文框已逐字摘录政策原文,若第一个中间环节与之近乎一字不差,
     # 说明把原文又抄了一遍——丢弃它,让第一个中间环节落到提炼后的机制节点(仍保留≥1 个中间环节)。
     if origin and len(steps) >= 2:
@@ -259,6 +258,120 @@ def _path_flow_html(p, actions):
             html += end_arrow if i == len(nodes) - 1 else arrow
         html += nd
     return '<div class="hia-flow">' + html + '</div>'
+
+
+def _origin_quote(p, actions):
+    """这条影响在节点流里展示的「政策原文逐字摘录」(链条起点)。供路径渲染与溯源高亮共用。"""
+    act_ev = {a["id"]: (a.get("evidence") or "").strip() for a in (actions or [])}
+    return act_ev.get(p.get("action_id"), "") or (
+        p.get("evidence", "") if p.get("status") == "文档支持" else "")
+
+
+# —— 政策原文溯源高亮:把摘录在原文里精确/近似定位,强化"有据可查、可审计" ——
+_QUOTE_NORM = {"«": "《", "»": "》", "〈": "《", "〉": "》",
+               "“": '"', "”": '"', "‘": "'", "’": "'"}
+_src_seq = [0]                                     # 高亮锚点 id 自增,避免多弹窗同 id 冲突
+
+
+def _collapse_for_match(text):
+    """丢弃空白 + 归一化书名号/引号(PDF 抽取常把《》→«»);返回(压缩串, 原文索引映射)。
+    保持 1 字符↔1 字符,索引映射可把压缩串里的位置还原回原文位置。"""
+    out, idx = [], []
+    for i, ch in enumerate(text):
+        if ch.isspace():
+            continue
+        c = _QUOTE_NORM.get(ch)
+        if c is None:                              # 全角→半角(政府公文常用全角数字/标点:１５%→15%、:→:)
+            nf = unicodedata.normalize("NFKC", ch)
+            c = nf if len(nf) == 1 else ch         # 仅 1↔1 映射,保证索引可还原
+        out.append(c)
+        idx.append(i)
+    return "".join(out), idx
+
+
+def _locate_quote(text, quote):
+    """在原文 text 里定位摘录 quote;返回 (start, end, mode) 原文区间,mode∈exact/approx;定位不到→None。"""
+    if not text or not quote:
+        return None
+    cq, _ = _collapse_for_match(quote)
+    ct, idx = _collapse_for_match(text)
+    if not cq or not ct:
+        return None
+    pos = ct.find(cq)
+    if pos != -1:
+        return (idx[pos], idx[pos + len(cq) - 1] + 1, "exact")
+    # 近似:PDF 抽取常把字符拆散/改字,致连续匹配断裂。以最长公共片段为锚点,
+    # 按引文长度在原文里框出对应段落(让锚点与其在引文中的位置对齐),并标「近似·请核对」。
+    m = difflib.SequenceMatcher(None, ct, cq, autojunk=False).find_longest_match(
+        0, len(ct), 0, len(cq))
+    if m.size >= max(6, int(len(cq) * 0.35)):     # 锚点够长才框,否则宁可判定不到(不臆造)
+        start = max(0, m.a - m.b)
+        end = min(len(ct), start + len(cq))
+        return (idx[start], idx[end - 1] + 1, "approx")
+    return None
+
+
+def _case_doc_text(case):
+    """从案例随附的政策原文文件重新抽取纯文本(供只读页溯源高亮)。无原文/抽取失败→空串。"""
+    dp = case_store.doc_path(case)
+    if not dp:
+        return ""
+    try:
+        with open(dp, "rb") as f:
+            data = f.read()
+        text, info = hs.extract_text(case.get("doc_name") or os.path.basename(dp), data)
+        return "" if info.get("error") else text
+    except Exception:                                 # noqa: BLE001
+        return ""
+
+
+def _open_source_dialog(doc_text, quote):
+    """弹窗展示政策原文并高亮该摘录:精确命中=蓝高亮+自动滚到位;近似命中给提示;定位不到给人工核对提示。"""
+    span = _locate_quote(doc_text, quote)
+    _src_seq[0] += 1
+    mid = f"srchl{_src_seq[0]}"
+    with ui.dialog() as dlg, ui.card().style("width:min(900px,95vw);max-width:95vw;gap:8px;"):
+        with ui.row().classes("w-full items-center justify-between no-wrap"):
+            ui.label("📄 政策原文溯源").style(
+                f"color:{GREEN_DEEP};font-weight:500;font-size:1.05rem;")
+            ui.button(icon="close", on_click=dlg.close).props("flat round dense")
+        ui.html('<div style="font-size:12px;color:var(--hia-neutral-500);">'
+                f'核对依据摘录:“{_esc(quote)}”</div>')
+        if span is None:
+            ui.html('<div style="font-size:12.5px;background:var(--hia-grade-50);'
+                    'color:var(--hia-grade-800);border-radius:6px;padding:8px 11px;">'
+                    '⚠ 未能在原文中精确定位该摘录(可能为概括或文档抽取差异),请人工核对下方原文。</div>')
+            body = _esc(doc_text)
+        else:
+            s, e, mode = span
+            if mode == "approx":
+                ui.html('<div style="font-size:12.5px;background:var(--hia-source-50);'
+                        'color:var(--hia-source-800);border-radius:6px;padding:8px 11px;">'
+                        'ℹ 下方蓝色高亮为系统在原文中近似定位的对应段落,请核对。</div>')
+            body = (_esc(doc_text[:s])
+                    + f'<mark id="{mid}" style="background:var(--hia-source-50);'
+                    'border-bottom:2px solid var(--hia-source-600);color:var(--hia-source-800);'
+                    'font-weight:500;padding:0 1px;">' + _esc(doc_text[s:e]) + '</mark>'
+                    + _esc(doc_text[e:]))
+        ui.html(f'<div style="white-space:pre-wrap;font-size:13px;line-height:1.7;'
+                f'max-height:64vh;overflow:auto;border:0.5px solid var(--hia-border);'
+                f'border-radius:var(--hia-radius-md);padding:12px 14px;'
+                f'color:var(--hia-neutral-700);">{body}</div>')
+    dlg.open()
+    if span is not None:
+        ui.run_javascript(
+            "setTimeout(function(){var el=document.getElementById('" + mid + "');"
+            "if(el)el.scrollIntoView({block:'center'});},150)")
+
+
+def _source_button(doc_text, p, actions):
+    """若有原文与摘录,渲一个「在原文中定位」按钮(/screen 与只读评审/参考页共用)。"""
+    quote = _origin_quote(p, actions)
+    if not (doc_text and quote):
+        return
+    ui.button("🔎 在原文中定位这段依据",
+              on_click=lambda: _open_source_dialog(doc_text, quote)).props(
+        "dense flat color=primary size=sm").classes("q-mt-xs")
 
 
 def chip(text, color):
@@ -573,6 +686,7 @@ def screen():
             if info.get("error"):
                 ui.notify(info["error"], type="negative")
                 return
+            st["text"] = text                         # 留作政策原文溯源高亮
             analyze_btn.disable()
             n = ui.notification("正在分析(约 30–60 秒,分三步梳理健康影响)…",
                                 spinner=True, timeout=None)
@@ -685,6 +799,8 @@ def screen():
                       f'border-radius:6px;padding:7px 11px;margin:5px 0 2px 12px;'
                       f'color:var(--hia-source-800);line-height:1.55;">'
                       f'“{_esc(p["evidence"])}”</div>')
+            # 溯源:在政策原文里精确定位这段摘录(可信/可审计)
+            _source_button(st.get("text"), p, (st["res"] or {}).get("actions", []))
             # 两轨依据:健康因果(WHO/文献) + 相关国家标准(暴露限值/管控基准)
             render_evidence(cards, p["chain"][-1] if p.get("chain") else "健康结果")
             # —— 专家反馈(可选):标出这条的问题,用于改进系统 ——
@@ -1022,6 +1138,7 @@ def _page_head():
 # 全站统一顶部导航(平台名 + 三大板块);active ∈ {"new","ledger","reference"}
 # 规范第 7 节:四项统一 14px + 间距,字重只用 400/500;「新建评估」NEW 标记缩为小角标(不喧宾夺主)。
 _NAV_ITEMS = [("新建评估", "/new", "new", True),
+              ("🩺 批量体检", "/batch", "batch", False),
               ("🗂 项目管理", "/ledger", "ledger", False),
               ("📚 案例参考", "/reference", "reference", False)]
 _NEW_BADGE = ('<sup style="font-size:9px;font-weight:500;color:#fff;'
@@ -1045,8 +1162,9 @@ def _top_nav(active=""):
                 ui.html(label + (_NEW_BADGE if is_new else ""))
 
 
-def render_pathway_ro(p, actions=None):
-    """只读渲染一条影响(供专家评审/汇总页):徽标行 + 影响链(节点流) + 依据折叠。"""
+def render_pathway_ro(p, actions=None, doc_text=None):
+    """只读渲染一条影响(供专家评审/汇总页):徽标行 + 影响链(节点流) + 依据折叠。
+    传入 doc_text(政策原文)则附「在原文中定位」溯源按钮。"""
     ui.html(badge_row(p) + _path_flow_html(p, actions or []))
     cards = p.get("cards") or []
     with ui.expansion("依据 / 详情", icon="menu_book").props("dense").classes(
@@ -1055,6 +1173,7 @@ def render_pathway_ro(p, actions=None):
             ui.label("主要影响人群:" + p["population"]).classes("text-xs")
         if p.get("status") == "文档支持" and p.get("evidence"):
             ui.label("📄 文件原文依据:" + p["evidence"]).classes("text-xs")
+        _source_button(doc_text, p, actions)
         render_evidence(cards, p["chain"][-1] if p.get("chain") else "健康结果")
 
 
@@ -1283,6 +1402,7 @@ def _render_review_form(case):
     res = case["res"]
     allp = res.get("pathways", [])
     res_items = {it["q"]: it for it in res.get("items", [])}
+    doc_text = _case_doc_text(case)               # 供专家在原文里核对每条依据
     ans, note = {}, {}
 
     # —— 给专家的任务说明(你只需做这三步)——
@@ -1326,7 +1446,7 @@ def _render_review_form(case):
                     ui.label(f"{len(ps)} 条影响" if ps else "无影响").classes("text-xs text-grey")
             ui.label("初筛表问题:" + hs.QUESTIONS[q - 1]).classes("text-xs text-grey")
             for p in ps:
-                render_pathway_ro(p, res.get("actions", []))
+                render_pathway_ro(p, res.get("actions", []), doc_text)
             if not ps:
                 ui.label("AI 未找到这一方面的影响。").classes("text-xs text-grey")
             ui.separator()
@@ -1566,6 +1686,252 @@ def _portal_card(icon, title, desc, href, accent=GREEN):
         ui.element("div").style(f"height:3px;width:38px;background:{accent};border-radius:2px;")
 
 
+# ==================== 证据库管理(自助维护证据卡)====================
+
+EV_Q_OPTS = {f"Q{i}": f"Q{i} · {hs.SHORT_Q[i-1]}" for i in range(1, 11)}
+
+
+def _ev_split(s):
+    return [x.strip() for x in re.split(r"[、,，;；\s]+", s or "") if x.strip()]
+
+
+def _ev_lines(s):
+    return [x.strip() for x in (s or "").splitlines() if x.strip()]
+
+
+def _ev_derive(keys, q, note, sources, kind):
+    """据当前输入派生 (kind, 来源等级) 供保存前预览。"""
+    card = {"keys": keys, "q": q, "note": note, "sources": sources}
+    if kind in ("因果", "基准"):
+        card["kind"] = kind
+    return hia_evidence.card_kind(card), hia_evidence.card_tier(card)[1]
+
+
+def _ev_kind_color(kind):
+    return GREEN_DEEP if kind == "因果" else "#5F5E5A"   # 因果=绿(健康因果) / 基准=灰(国标基准)
+
+
+def _ev_kind_label(kind):
+    """给零基础用户的大白话类型名(界面显示用;内部仍是 因果/基准)。"""
+    return "权威研究证据" if kind == "因果" else "国家标准限值"
+
+
+@ui.page("/evidence")
+def evidence_admin():
+    if not require_app_login():
+        return
+    _page_head()
+    _top_nav("")
+    with ui.row().classes("w-full items-center q-pa-md").style(
+            f"background:linear-gradient(90deg,#EAF7EF,#F6FCF8);border-left:6px solid {GREEN};"
+            "border-radius:8px;"):
+        with ui.column().classes("gap-0"):
+            ui.label("证据库管理").style(
+                f"color:{GREEN_DEEP};font-size:1.5rem;font-weight:700;")
+            ui.label("AI 初筛每条健康影响时,会自动配上「依据」(WHO 权威研究或国家标准)。"
+                     "在这里可以补充新的依据卡:填好关键词和来源,保存后立即生效——"
+                     "下次 AI 遇到相关内容就会引用它。系统自带的依据随版本发布;你补充的卡存在本机、可随时导出备份。").style(
+                "color:#5a7a66;font-size:.85rem;line-height:1.7;")
+
+    # —— 怎么用:三步 ——
+    with ui.row().classes("w-full gap-2 q-mt-sm").style("flex-wrap:wrap;"):
+        for i, (t, d) in enumerate([
+                ("先查重", "在下方「已有依据」搜一下,系统是否已覆盖"),
+                ("填写", "填下面的表单,可先点「填入示例」看样例"),
+                ("保存即生效", "保存后 AI 初筛立即开始引用这条依据")], 1):
+            with ui.row().classes("items-center gap-2").style(
+                    "background:#F2F8F4;border-radius:8px;padding:6px 12px;"):
+                ui.html(f'<span style="width:20px;height:20px;border-radius:50%;background:{GREEN};'
+                        f'color:#fff;display:inline-flex;align-items:center;justify-content:center;'
+                        f'font-size:12px;font-weight:500;">{i}</span>')
+                ui.label(t).classes("text-sm").style(f"color:{GREEN_DEEP};font-weight:500;")
+                ui.label(d).classes("text-xs").style("color:#5a7a66;")
+
+    ui.label("⚠ 只填已核实的真实来源(标准号、限值、网址须真实)——不要编造。").classes(
+        "text-xs q-mt-xs").style("color:#B07A00;")
+
+    edit = {"id": None}
+
+    # ===== 新增 / 编辑表单 =====
+    with ui.card().classes("w-full q-mt-sm").style("border:1px solid #DCEEE3;"):
+        title = ui.label("➕ 填写一张新的依据卡").classes("font-medium").style(f"color:{GREEN_DEEP};")
+        with ui.row().classes("w-full gap-3 items-center"):
+            q_sel = ui.select(EV_Q_OPTS, value="Q1", label="这条依据属于哪个健康方面?").props(
+                "dense").style("min-width:240px;")
+            kind_sel = ui.select(
+                {"": "自动判断(推荐)", "因果": "权威研究(WHO/文献)", "基准": "国家标准限值(GB 等)"},
+                value="", label="依据类型").props("dense").style("min-width:210px;")
+            status_sw = ui.switch("这条来源我已核实", value=True)
+        ui.label("一般「依据类型」选『自动判断』即可:来源里含 GB/国家标准的,自动当『国家标准限值』,"
+                 "其余当『权威研究』。").classes("text-xs").style("color:#9AA0A6;")
+
+        keys_in = ui.input("关键词").classes("w-full")
+        ui.label("AI 初筛的影响链里出现这些词,就会引用这张卡。多写几个同义说法,用、或逗号分隔。"
+                 "例:噪声、交通噪声、施工噪声、声环境。").classes("text-xs").style("color:#9AA0A6;")
+        note_in = ui.textarea("依据要点 / 限值").classes("w-full")
+        ui.label("一句话写清已核实的关键结论或限值。例:夜间社会生活噪声限值约 55 分贝,"
+                 "长期超标与高血压、睡眠障碍相关。").classes("text-xs").style("color:#9AA0A6;")
+        src_in = ui.textarea("来源出处").classes("w-full")
+        ui.label("每行一条,写清『标准名 标准号. 发布机构. 网址』。"
+                 "例:声环境质量标准 GB 3096-2008. 生态环境部.").classes("text-xs").style(
+            "color:#9AA0A6;")
+
+        @ui.refreshable
+        def kind_preview():
+            keys = _ev_split(keys_in.value)
+            k, _ = _ev_derive(keys, q_sel.value, note_in.value or "",
+                              _ev_lines(src_in.value), kind_sel.value or None)
+            if not keys:
+                ui.html('<div style="background:var(--hia-source-50);color:var(--hia-source-800);'
+                        'border-radius:8px;padding:8px 12px;font-size:12.5px;">'
+                        '📌 填好关键词后,这里会说明这张卡何时会被 AI 引用。</div>')
+                return
+            kws = "、".join(keys[:3]) + ("…" if len(keys) > 3 else "")
+            ui.html('<div style="background:var(--hia-source-50);color:var(--hia-source-800);'
+                    'border-radius:8px;padding:8px 12px;font-size:12.5px;line-height:1.6;">'
+                    f'📌 保存后:AI 初筛遇到含「{_esc(kws)}」的健康影响时,'
+                    f'会自动把这张卡作为〔<b>{_ev_kind_label(k)}</b>〕依据列出。</div>')
+        kind_preview()
+        keys_in.on_value_change(lambda e: kind_preview.refresh())
+        src_in.on_value_change(lambda e: kind_preview.refresh())
+        kind_sel.on_value_change(lambda e: kind_preview.refresh())
+
+        def reset_form():
+            edit["id"] = None
+            title.set_text("➕ 填写一张新的依据卡")
+            q_sel.value, kind_sel.value, status_sw.value = "Q1", "", True
+            keys_in.value = note_in.value = src_in.value = ""
+            kind_preview.refresh()
+
+        def fill_example():
+            edit["id"] = None
+            title.set_text("➕ 填写一张新的依据卡")
+            q_sel.value, kind_sel.value, status_sw.value = "Q2", "", True
+            keys_in.value = "噪声、交通噪声、施工噪声、声环境"
+            note_in.value = ("夜间(22:00–6:00)社会生活噪声排放限值约 55 分贝;"
+                             "长期噪声暴露与高血压、睡眠障碍相关。")
+            src_in.value = ("声环境质量标准 GB 3096-2008. 生态环境部.\n"
+                            "社会生活环境噪声排放标准 GB 22337-2008. 生态环境部.")
+            kind_preview.refresh()
+            ui.notify("已填入一个示例,可直接保存,或改成你自己的内容。", type="info")
+
+        def fill_form(c):
+            edit["id"] = c.get("id")
+            title.set_text("✏ 编辑证据卡")
+            q_sel.value = c.get("q", "Q1")
+            kind_sel.value = c.get("kind", "") if c.get("kind") in ("因果", "基准") else ""
+            status_sw.value = c.get("status", "done") != "todo"
+            keys_in.value = "、".join(c.get("keys", []))
+            note_in.value = c.get("note", "")
+            src_in.value = "\n".join(c.get("sources", []))
+            kind_preview.refresh()
+
+        def do_save():
+            keys = _ev_split(keys_in.value)
+            srcs = _ev_lines(src_in.value)
+            if not keys:
+                ui.notify("请至少填写一个关键词。", type="warning"); return
+            if not srcs:
+                ui.notify("请至少填写一条来源(标准号/权威出处)。", type="warning"); return
+            card = {"keys": keys, "q": q_sel.value, "note": note_in.value or "",
+                    "sources": srcs, "status": "done" if status_sw.value else "todo",
+                    "kind": kind_sel.value or None}
+            if edit["id"]:
+                hia_evidence.update_user_card(edit["id"], card)
+                ui.notify("✅ 已更新该证据卡。", type="positive")
+            else:
+                hia_evidence.add_user_card(card)
+                ui.notify("✅ 已新增证据卡,已并入匹配。", type="positive")
+            reset_form()
+            user_cards_view.refresh()
+
+        with ui.row().classes("items-center gap-2 q-mt-sm"):
+            ui.button("保存卡片", on_click=do_save).props("color=primary")
+            ui.button("填入示例", on_click=fill_example).props("flat color=primary")
+            ui.button("清空 / 取消编辑", on_click=reset_form).props("flat")
+
+    # ===== 我补充的依据卡 =====
+    with ui.row().classes("w-full items-center justify-between q-mt-md"):
+        ui.label("我补充的依据卡").classes("text-base font-medium")
+
+        def do_export():
+            data = json.dumps(hia_evidence.list_user_cards(), ensure_ascii=False, indent=2)
+            ui.download(data.encode("utf-8"), "evidence_user.json")
+        ui.button("⬇ 导出全部用户卡(JSON)", on_click=do_export).props(
+            "flat dense color=primary")
+
+    @ui.refreshable
+    def user_cards_view():
+        cards = hia_evidence.list_user_cards()
+        if not cards:
+            ui.label("还没有补充任何依据卡。用上面的表单添加(可先点「填入示例」);保存后立即生效。").classes(
+                "text-xs text-grey")
+            return
+        for c in cards:
+            kind = hia_evidence.card_kind(c)
+            with ui.card().classes("w-full").style(
+                    "border:0.5px solid var(--hia-border);border-radius:8px;padding:10px 12px;gap:3px;"):
+                with ui.row().classes("items-center gap-2 flex-wrap"):
+                    ui.html(chip(EV_Q_OPTS.get(c["q"], c["q"]), GREEN_DEEP))
+                    ui.html(chip(_ev_kind_label(kind), _ev_kind_color(kind)))
+                    ui.html(chip(hia_evidence.card_tier(c)[1], "#888"))
+                    ui.html(chip("已核实" if c.get("status") != "todo" else "待补强",
+                                 GREEN_DEEP if c.get("status") != "todo" else "#B07A00"))
+                    ui.element("div").style("flex:1;")
+                    ui.button("编辑", on_click=lambda c=c: fill_form(c)).props(
+                        "dense flat size=sm color=primary")
+
+                    def _del(c=c):
+                        hia_evidence.delete_user_card(c["id"])
+                        ui.notify("已删除。", type="positive")
+                        user_cards_view.refresh()
+                    ui.button("删除", on_click=_del).props("dense flat size=sm color=grey")
+                ui.label("关键词:" + "、".join(c.get("keys", []))).classes("text-xs")
+                if c.get("note"):
+                    ui.label("要点:" + c["note"]).classes("text-xs").style("color:#5a7a66;")
+                for s in c.get("sources", []):
+                    ui.label("来源:" + s).classes("text-xs").style("color:#5a7a66;")
+    user_cards_view()
+
+    # ===== 内置证据卡(只读参考,避免重复建卡)=====
+    ui.separator().classes("q-mt-md")
+    ui.label("已有依据(系统自带 · 只读)").classes("text-base font-medium q-mt-sm")
+    ui.label("新增前先在这里搜一下,看系统是否已经覆盖,避免重复建卡。可按健康方面 + 关键词筛选。").classes(
+        "text-xs text-grey")
+    bflt = {"q": "全部", "kw": ""}
+    with ui.row().classes("w-full items-center gap-3"):
+        bq = ui.select({"全部": "全部题号", **EV_Q_OPTS}, value="全部", label="题号").props(
+            "dense options-dense").style("min-width:200px;")
+        bkw = ui.input("关键词筛选").props("dense clearable").classes("flex-grow")
+        bq.on_value_change(lambda e: (bflt.__setitem__("q", e.value), builtin_view.refresh()))
+        bkw.on_value_change(lambda e: (bflt.__setitem__("kw", (e.value or "").strip()),
+                                       builtin_view.refresh()))
+
+    @ui.refreshable
+    def builtin_view():
+        builtin = [c for c in hia_evidence._BUILTIN_CARDS
+                   if (bflt["q"] == "全部" or c["q"] == bflt["q"])
+                   and (not bflt["kw"] or any(bflt["kw"] in k for k in c["keys"])
+                        or bflt["kw"] in c.get("note", ""))]
+        ui.label(f"命中 {len(builtin)} 张(内置共 {len(hia_evidence._BUILTIN_CARDS)} 张)").classes(
+            "text-xs text-grey")
+        for c in builtin[:40]:
+            kind = hia_evidence.card_kind(c)
+            with ui.row().classes("w-full items-start gap-2 no-wrap").style(
+                    "padding:5px 4px;border-bottom:1px solid #F0F5F2;"):
+                ui.html(chip(c["q"], GREEN_DEEP))
+                ui.html(chip(_ev_kind_label(kind), _ev_kind_color(kind)))
+                with ui.column().classes("gap-0"):
+                    ui.label("、".join(c["keys"])).classes("text-xs")
+                    if c.get("note"):
+                        ui.label(c["note"][:80] + ("…" if len(c.get("note", "")) > 80 else "")
+                                 ).classes("text-xs").style("color:#5a7a66;")
+        if len(builtin) > 40:
+            ui.label(f"(仅显示前 40 张,共 {len(builtin)} 张;请用关键词进一步筛选)").classes(
+                "text-xs text-grey")
+    builtin_view()
+
+
 @ui.page("/")
 def home():
     if not require_app_login():
@@ -1583,15 +1949,20 @@ def home():
         _portal_card("🆕", "新建健康影响评估",
                      "上传政策/规划文档,AI 展开健康影响路径、对照初筛表。可选单人快速初筛或多专家协同评估。",
                      "/new")
+        _portal_card("🩺", "批量政策体检",
+                     "一次上传多份政策文档,AI 逐份初筛,汇总成「政策 × 健康维度」体检表与监管视角,快速扫描重点。",
+                     "/batch", accent="#2E6DB4")
         _portal_card("🗂", "项目管理",
                      "查阅既往全部评估项目,搜索/筛选、重新导出初筛表、归档与发布参考案例。",
                      "/ledger")
         _portal_card("📚", "案例参考",
                      "浏览已发布为范例的评估项目,学习健康影响识别与判定的参考写法。",
                      "/reference")
-    with ui.row().classes("w-full justify-center q-mt-xl"):
+    with ui.column().classes("w-full items-center q-mt-xl gap-1"):
         ui.label("⚠ 本平台借助 AI 辅助梳理,结论与签字以专家判断为准,不替代专家。").classes(
             "text-xs text-grey")
+        ui.link("📖 证据库管理(维护 WHO/国标依据卡)", "/evidence").props("no-underline").style(
+            "color:#5a7a66;font-size:.8rem;")
 
 
 @ui.page("/new")
@@ -1612,6 +1983,247 @@ def new_assessment():
         _portal_card("📤", "发起专家组协同评估",
                      "经办人发起:上传文档 → AI 初筛 → 生成「评审链接+口令」邀请多位专家独立评定 → 汇总共识、组长定稿。",
                      "/panel", accent="#2E6DB4")
+
+
+# ==================== 批量政策体检 / 监管看板 ====================
+
+def _batch_dims_header_html():
+    """体检表 10 维表头:编号 + tooltip 全称(与下方色格对齐)。"""
+    cells = ""
+    for q in range(1, 11):
+        cells += (f'<div title="{q}. {_esc(hs.SHORT_Q[q-1])}" style="flex:1;text-align:center;'
+                  f'font-size:11px;color:var(--hia-neutral-500);">{q}</div>')
+    return f'<div style="display:flex;flex:1;gap:2px;">{cells}</div>'
+
+
+@ui.page("/batch")
+def batch():
+    if not require_app_login():
+        return
+    _page_head()
+    ui.query(".nicegui-content").style("max-width:1180px;")   # 体检表较宽,放宽页面
+    _top_nav("batch")
+    with ui.row().classes("w-full items-center q-pa-md").style(
+            f"background:linear-gradient(90deg,#EAF7EF,#F6FCF8);border-left:6px solid {GREEN};"
+            "border-radius:8px;"):
+        with ui.column().classes("gap-0"):
+            ui.label("批量政策体检").style(
+                f"color:{GREEN_DEEP};font-size:1.5rem;font-weight:700;")
+            ui.label("一次上传多份政策/规划文档,AI 逐份初筛,汇总成一张「政策 × 健康维度」体检表,"
+                     "快速扫描哪些政策、哪些健康维度需要关注。").style(
+                "color:#5a7a66;font-size:.85rem;")
+
+    state = {"files": [], "results": [], "running": False}     # files:[{name,bytes}] results:[rec]
+    prog = {"done": 0, "total": 0, "cur": ""}
+
+    # ===== 上传(多份)=====
+    async def on_upload(e):
+        data = await e.file.read()
+        state["files"] = [f for f in state["files"] if f["name"] != e.file.name]  # 同名去重
+        state["files"].append({"name": e.file.name, "bytes": data})
+        file_list.refresh()
+
+    ui.upload(on_upload=on_upload, auto_upload=True, multiple=True).props(
+        'accept=".pdf,.docx" flat bordered label="拖入或选择多份 PDF / Word"').classes(
+        "w-full q-mt-sm")
+    key_in = ui.input("分析服务密钥(API Key)", password=True, value=_get_key(),
+                      placeholder="sk-...").classes("w-full q-mt-sm")
+
+    @ui.refreshable
+    def file_list():
+        if not state["files"]:
+            ui.label("尚未添加文件。可一次拖入多份政策/规划文档。").classes("text-xs text-grey")
+            return
+        with ui.row().classes("items-center gap-2 flex-wrap q-mt-xs"):
+            ui.label(f"待体检 {len(state['files'])} 份:").classes("text-xs text-grey")
+            for f in state["files"]:
+                nm = f["name"] if len(f["name"]) <= 26 else f["name"][:26] + "…"
+                ui.html(chip(nm, "#5a7a66"))
+    file_list()
+
+    # ===== 单份/批量入库 =====
+    def _save_one(r):
+        lvl = r.get("level") if r.get("level") in ("很小", "轻度", "重大") else "轻度"
+        case = case_store.save_single_case(
+            r.get("title") or os.path.splitext(r["fname"])[0],
+            r["res"], r["info"], r["items"], lvl,
+            "(批量体检 AI 自动初筛,尚未经专家核定)",
+            doc_bytes=r.get("bytes"), doc_filename=r["fname"],
+            adopted_ids=r.get("adopted_ids"))
+        case_store.set_status(case["id"], "评审中")   # AI 初筛态,待专家核定,不直接定稿
+        r["saved_id"] = case["id"]
+        return case["id"]
+
+    def _save_row(r):
+        _save_one(r)
+        ui.notify(f"✅ 已存入项目管理(案例码 {r['saved_id']});可在「项目管理」查阅、核定、重导出。",
+                  type="positive", timeout=5000)
+        dashboard.refresh()
+
+    def _save_all(recs):
+        n = 0
+        for r in recs:
+            if not r.get("saved_id"):
+                _save_one(r); n += 1
+        ui.notify(f"✅ 已把 {n} 份存入项目管理(状态=评审中,待专家核定)。", type="positive")
+        dashboard.refresh()
+
+    def _batch_row(r):
+        with ui.row().classes("w-full items-center gap-2 no-wrap").style(
+                "padding:5px 6px;border-bottom:1px solid #F0F5F2;"):
+            ui.label(r.get("title") or r["fname"]).classes("text-xs").style(
+                "min-width:200px;max-width:200px;overflow:hidden;text-overflow:ellipsis;"
+                "white-space:nowrap;").tooltip(r["fname"])
+            cells = ""
+            for q in range(1, 11):
+                a = r["ans"].get(q, "否")
+                cells += (f'<div title="{q}. {_esc(hs.SHORT_Q[q-1])}:{ANSWER_LABEL[a]}" '
+                          f'style="flex:1;height:15px;border-radius:3px;'
+                          f'background:{ANSWER_COLOR[a]};"></div>')
+            ui.html(f'<div style="display:flex;flex:1;gap:2px;">{cells}</div>').classes("flex-grow")
+            ui.label(r.get("level") or "—").classes("text-xs").style(
+                "min-width:42px;text-align:center;color:var(--hia-neutral-700);")
+            if r.get("saved_id"):
+                ui.label("✓ 已入库").classes("text-xs").style(
+                    "min-width:86px;color:var(--hia-benefit-600);")
+            else:
+                ui.button("存入台账", on_click=lambda r=r: _save_row(r)).props(
+                    "dense flat color=primary size=sm").style("min-width:86px;")
+
+    # ===== 看板 =====
+    @ui.refreshable
+    def dashboard():
+        done = [r for r in state["results"] if not r.get("error")]
+        failed = [r for r in state["results"] if r.get("error")]
+        if not state["results"]:
+            ui.label("体检结果将在这里汇总成「政策 × 健康维度」热力图与监管视角。").classes(
+                "text-sm text-grey")
+            return
+        relevant = [r for r in done if r.get("relevant")]
+        attention = [r for r in done if any(v == "是" for v in r["ans"].values())]
+        total_path = sum(r.get("n_path", 0) for r in done)
+        metrics = [("体检政策", len(state["results"]), GREEN_DEEP),
+                   ("有健康关联", len(relevant), "#2E6DB4"),
+                   ("含需关注维度", len(attention), ANSWER_COLOR["是"]),
+                   ("健康影响路径", total_path, GREEN_DEEP)]
+        with ui.row().classes("w-full gap-3"):
+            for label, val, col in metrics:
+                with ui.card().classes("items-center").style(
+                        f"flex:1;border-left:4px solid {col};padding:10px;"):
+                    ui.label(str(val)).style(f"font-size:1.6rem;font-weight:500;color:{col};")
+                    ui.label(label).classes("text-xs text-grey")
+
+        # —— 体检表(政策 × 10 维)——
+        with ui.row().classes("w-full items-center justify-between q-mt-md"):
+            ui.label("政策 × 健康维度 体检表").classes("text-base font-medium")
+            ui.label("色格:🔴需关注 🟡尚不确定 🟢暂未发现(悬停看维度与判定)").classes(
+                "text-xs text-grey")
+        with ui.row().classes("w-full items-center gap-2 no-wrap").style("padding:0 6px;"):
+            ui.label("政策").classes("text-xs").style(
+                "min-width:200px;color:var(--hia-neutral-500);")
+            ui.html(_batch_dims_header_html()).classes("flex-grow")
+            ui.label("程度").classes("text-xs").style(
+                "min-width:42px;text-align:center;color:var(--hia-neutral-500);")
+            ui.element("div").style("min-width:86px;")
+        for r in done:
+            _batch_row(r)
+        for r in failed:
+            with ui.row().classes("w-full items-center gap-2").style(
+                    "padding:5px 6px;border-bottom:1px solid #F0F5F2;"):
+                ui.label("⚠ " + r["name"]).classes("text-xs").style("min-width:200px;")
+                ui.label("解析失败:" + str(r.get("error"))).classes("text-xs").style(
+                    "color:#B07A00;")
+
+        unsaved = [r for r in relevant if not r.get("saved_id")]
+        if unsaved:
+            ui.button(f"🗂 把全部有健康关联的存入项目管理({len(unsaved)} 份)",
+                      on_click=lambda: _save_all(unsaved)).props("outline color=primary").classes(
+                "q-mt-sm")
+
+        # —— 监管视角:各维度被政策触及情况 ——
+        if done:
+            ui.label("监管视角 · 各健康维度被政策触及情况").classes("text-base font-medium q-mt-md")
+            ui.label("条形 = 触及该维度的政策占比(红=需关注 / 黄=尚不确定);"
+                     "一眼看出哪些健康维度被政策普遍涉及、哪些被忽视。").classes("text-xs text-grey")
+            tot = len(done)
+            for q in range(1, 11):
+                nyes = sum(1 for r in done if r["ans"].get(q) == "是")
+                nmaybe = sum(1 for r in done if r["ans"].get(q) == "不知道")
+                wyes = nyes / tot * 100
+                wmaybe = nmaybe / tot * 100
+                with ui.row().classes("w-full items-center gap-2 no-wrap").style("padding:3px 0;"):
+                    ui.label(f"{q}. {hs.SHORT_Q[q-1]}").classes("text-xs").style(
+                        "min-width:130px;color:var(--hia-neutral-700);")
+                    ui.html(
+                        f'<div style="flex:1;height:14px;background:var(--hia-neutral-50);'
+                        f'border-radius:7px;overflow:hidden;display:flex;">'
+                        f'<div style="width:{wyes:.0f}%;background:{ANSWER_COLOR["是"]};"></div>'
+                        f'<div style="width:{wmaybe:.0f}%;background:{ANSWER_COLOR["不知道"]};">'
+                        f'</div></div>').classes("flex-grow")
+                    txt = (f"{nyes} 需关注" if nyes else "—") + (
+                        f" · {nmaybe} 待定" if nmaybe else "")
+                    ui.label(txt).classes("text-xs text-grey").style("min-width:110px;")
+
+    # ===== 跑批 =====
+    async def run_batch():
+        key = (key_in.value or "").strip()
+        if not state["files"]:
+            ui.notify("请先上传至少一份文件。", type="warning"); return
+        if not key:
+            ui.notify("请先填写分析服务密钥。", type="warning"); return
+        state["running"] = True
+        state["results"] = []
+        prog.update(done=0, total=len(state["files"]), cur="")
+        run_btn.disable()
+        progress_view.refresh(); dashboard.refresh()
+        for f in state["files"]:
+            prog["cur"] = f["name"]; progress_view.refresh()
+            rec = {"name": f["name"], "fname": f["name"], "bytes": f["bytes"]}
+            try:
+                text, info = hs.extract_text(f["name"], f["bytes"])
+                if info.get("error"):
+                    rec["error"] = info["error"]
+                else:
+                    res = await run.io_bound(hs.analyze, text, key,
+                                             project_name=os.path.splitext(f["name"])[0])
+                    adopted = [p for p in res["pathways"] if _adopt_default(p)]
+                    items = hs.compute_items(adopted)
+                    n_path = len(res["pathways"])
+                    n_src = sum(1 for p in res["pathways"] if p.get("cards"))
+                    rec.update(res=res, info=info, items=items,
+                               ans={it["q"]: it["answer"] for it in items},
+                               adopted_ids=[p["id"] for p in adopted],
+                               title=hs.guess_title(text, fallback=os.path.splitext(f["name"])[0]),
+                               level=res.get("suggest_level") or "—",
+                               n_actions=len(res["actions"]), n_path=n_path,
+                               n_gap=n_path - n_src, relevant=n_path > 0)
+            except Exception as ex:                       # noqa: BLE001
+                rec["error"] = str(ex)
+            state["results"].append(rec)
+            prog["done"] += 1
+            progress_view.refresh(); dashboard.refresh()
+        state["running"] = False
+        prog["cur"] = ""
+        run_btn.enable()
+        progress_view.refresh(); dashboard.refresh()
+        ui.notify(f"✅ 体检完成:共 {prog['done']} 份。", type="positive")
+
+    run_btn = ui.button("🩺 开始批量体检", on_click=run_batch).props("color=primary").classes(
+        "q-mt-sm")
+    ui.label("逐份分析,每份约 30–60 秒;期间请保持页面打开。").classes("text-xs text-grey")
+
+    @ui.refreshable
+    def progress_view():
+        if not state["running"]:
+            return
+        cur = (prog["cur"][:30] + "…") if len(prog["cur"]) > 30 else prog["cur"]
+        with ui.row().classes("items-center gap-3 w-full q-mt-xs"):
+            ui.spinner(size="sm")
+            ui.label(f"体检中… {prog['done']}/{prog['total']}　当前:{cur}").classes("text-sm")
+    progress_view()
+
+    ui.separator().classes("q-mt-md")
+    dashboard()
 
 
 @ui.page("/reference")
@@ -1665,6 +2277,7 @@ def _reference_row(c):
         if opinion:
             ui.label("专家组意见:" + opinion).classes("text-xs text-grey q-mt-xs")
         # 逐题判定 + AI 梳理的影响路径(只读)
+        doc_text = _case_doc_text(c)              # 供范例查阅时在原文里核对依据
         allp = (c.get("res") or {}).get("pathways", [])
         for q in range(1, 11):
             ps = [p for p in allp if p.get("outcome_q") == q]
@@ -1679,7 +2292,7 @@ def _reference_row(c):
                         ui.label(f"{len(ps)} 条影响" if ps else "无影响").classes(
                             "text-xs text-grey")
                 for p in ps:
-                    render_pathway_ro(p, (c.get("res") or {}).get("actions", []))
+                    render_pathway_ro(p, (c.get("res") or {}).get("actions", []), doc_text)
                 if not ps:
                     ui.label("该方面未梳理出影响。").classes("text-xs text-grey")
         # 下载范例初筛表
