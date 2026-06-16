@@ -120,6 +120,7 @@
 - **★评测回归套件 `eval/`**(随仓库):`labels.py`(金标准标签 A 应有路径/B 应≈0/X 边界不计率/C 抽取失败) + `score.py`(算假阴假阳率 + 对比 `baseline.json` 标✅修复/⚠新增) + `precheck.py`(抽取层预检) + `REGRESS.md`(用法) + `_ground_truth.md`(标注依据) + `sampling_plan.md`(评测集扩充清单)。**改引擎后必跑**:`run_eval.py "E:\projects\test"` → `score.py` → 满意 `score.py --save-baseline`。当前 `baseline.json` = 修复后基线。
 - **已知问题**:引擎**判定不稳定/不可复现**(同文档两跑路径数波动大,如市场准入负面清单 0↔19、长株潭绿心 11↔25)——根因 LLM 自由生成 + 温度扰动 + 超长文档截断点漂移。评测最好多跑取稳或降温度。
 - **下一步优化方向(复核报告六条,按 ROI)**:①评测集自动化(已落地)→②`policy_type` 代码硬门控(extract 已输出却被丢弃)→③知识库 RAG 化(因果模板库+证据卡向量检索+案例数据飞轮,**最大杠杆,根治自由生成**)→④路径判别器→⑤分层抽取(先抽政策目标再抽行动)→⑥模型分工。评测集扩充见 `sampling_plan.md`(按 10 维度补多部门+含健康词的程序类负样本)。
+- **语料采集器 `eval/hia_policy_crawler.py`**(自包含,可移植):从 gov.cn 政策文件库(t=zhengcelibrary_bm)按部门白名单定向抓取,仅收 pdf/docx、每部门配额、断点续传、出 `_index.xlsx`。**关键修复 lxml→html.parser**——gov.cn 详情页 HTML 不规范,lxml 会截断丢正文(UCAP-CONTENT/pages_content 取 0 字),html.parser 才正常。已验证通过(test2 抓首批 4 份:社区卫生/生育友好/节能降碳/新能源重卡,正好补发改委集缺的维度)。**另一台机:装依赖+改 OUT_DIR 一行即可跑**。
 - ⚠ **改的是引擎核心提示词,线上未更新**:需 `git push` → 服务器 `git pull && systemctl restart hia` 才生效。
 
 ## 待办 / 进行中
@@ -129,6 +130,7 @@
 4. **分析平台部署**:hia_demo 部署到实验室真机(校内/内部)或阿里云(若升配);先原样搬,UI 后议。
 5. **安全收尾**:DeepSeek key 明文出现过,**需轮换**(改 `/etc/hia-screening.env` 后 `systemctl restart hia`);实验室服务器 **SSH 密码需改**;安全组从 `0.0.0.0/0` 收紧。
 6. **可选功能**:项目台账状态流转、角色/权限、监管看板、站内推送。
+7. **引擎判定优化 + 评测集扩充**(进行中):用 `eval/hia_policy_crawler.py` 在另一台机按 `sampling_plan.md` 抓多部门语料(卫健/生态环境/住建/市场监管/交通/民政等)→ 汇总后 `precheck` + `labels.py` 标注 → 并入均衡基准重跑基线。引擎优化按复核报告六条 ROI 推进(下一步 `policy_type` 代码硬门控 / RAG 知识库)。
 
 ## 跨机器工作流
 - **开工** `git pull`;**收工** `git add -A && git commit -m "..." && git push`。
