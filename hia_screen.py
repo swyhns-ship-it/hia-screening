@@ -15,6 +15,7 @@ logic framework 与社会健康决定因素(SDH/Dahlgren–Whitehead)方法。
 AI 仅辅助研判与展开路径,采纳/剪枝/判定/签字以专家为准。
 """
 import json
+import os
 import re
 from io import BytesIO
 
@@ -23,7 +24,8 @@ import requests
 import hia_evidence
 
 API_URL = "https://api.deepseek.com/chat/completions"
-MODEL = "deepseek-chat"
+# 路径识别(生成)默认用 deepseek-v4-flash;可经环境变量覆盖。审核侧用更强的 v4-pro(见 cross_check)。
+MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 MAX_DOC_CHARS = 40000
 ANSWERS = ("是", "不知道", "否")
 STRENGTHS = ("强", "中", "推测")
@@ -126,14 +128,15 @@ def _extract_json(content):
         return {}
 
 
-def _chat_json(system, user, key, timeout=120, max_tokens=4000, temps=(0.3, 0.8)):
-    """调 DeepSeek(json_object)+ 稳健提取 + 升温重试,返回 dict(失败为 {})。"""
+def _chat_json(system, user, key, timeout=120, max_tokens=4000, temps=(0.3, 0.8), model=None):
+    """调 DeepSeek(json_object)+ 稳健提取 + 升温重试,返回 dict(失败为 {})。
+    model 可指定模型(如审核用 deepseek-v4-pro);缺省用 MODEL(生成,v4-flash)。"""
     for temp in temps:
         try:
             r = requests.post(
                 API_URL,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"model": MODEL,
+                json={"model": model or MODEL,
                       "messages": [{"role": "system", "content": system},
                                    {"role": "user", "content": user}],
                       "temperature": temp, "response_format": {"type": "json_object"},
@@ -199,78 +202,93 @@ def extract_actions(doc_text, key, project_name=""):
 
 
 # ============ ② 路径展开 ============
-_SYS_EXPAND = f"""你是 HIA 因果路径分析专家。给定政策"行动"清单,系统化地推演每个行动如何
-**经由健康决定因素、多级且常常间接地**影响人群健康,最终落到初筛表的某一个重点问题上。
+_SYS_EXPAND = f"""你是 HIA(健康影响评估)危害筛查与措施建议专家。HIA 的目的**不只是发现危害,而是促成
+控制措施**。很多危害(如施工扬尘)在有措施控制时不成其为风险,但若政策**未作要求就可能变成真实危害**。
 
-务必先判健康关联(**看政策目标,不要孤立看单条行动的字面**):
-0a. **服务于减排/降碳/节能/清洁能源/生态/污染治理/绿色低碳目标的行动,即使单条是工程技术
-    指标也要展开**:像"供电煤耗270克/千瓦时""机组负荷变化速率""度电碳排放降10%""储能配置"
-    "调峰能力"这类单看是纯参数,但它们整体服务于减污降碳——应把同目标的技术行动**归并**,
-    展开该政策"减排/降污 → 空气/水/温室气体改善 → 人群健康"的路径。**不要因为单条像技术
-    参数就跳过,否则会漏掉煤电升级、储能、节能降碳这类核心环境健康政策。**
-0b. **纯经济/管理类政策,即使含"电力/运输/项目/能源"等词也不展开**:整份政策若属
-    价格/定价/交易/结算/成本监审/财务/税费/补贴/统计分类/数据互联/金融(基金/REITs/信贷)/
-    资质认定/评审遴选/行政处罚程序等,**不引入实体环境或人群行为的实际改变**,则
-    pathways 返回空或极少(≤1)。例:"输配电定价办法""物流数据开放""REITs行业清单"
-    "互联网平台价格规则"——这些**不要**穷举到呼吸/睡眠/慢病。**宁缺勿造,假阳性比漏掉更糟。**
-1. **多视角全覆盖**:从这些视角各自审视,别漏:{"、".join(LENSES)}。
-2. **沿决定因素逐层展开**(可 2–3 级串联):\n{DETERMINANTS}
-3. **重视间接路径**:如"货运增加→道路阻隔/噪声→体力活动下降→慢性病";"用地改变→就业/收入→医疗可及性"。
-4. **关注脆弱群体**:老人、儿童、户外劳动者、低收入、慢病人群。
-5. **每条路径的 chain 必须完整写出各级节点**,不要用"同上""同A1路径"等交叉引用代替具体链路。
-   chain 的**第一个节点用提炼后的简短动作**(如"完善污水管网""推进电炉短流程"),
-   **不要照抄政策原文长句**——原文逐字摘录请放进 evidence 字段,chain 只放提炼后的机制节点。
+任务:给定政策"行动"清单,识别**潜在不利健康影响(危害)**,并对每条:
+① 写出危害路径(行动→决定因素→不利健康结果);
+② 判断政策原文**是否已含控制该危害的措施**:"已含"/"不足"/"未提及"(mitigation 字段);
+③ 给出**具体可操作的建议缓解措施**(measures 字段)。
+**只找危害不找好处**(direction 只用"风险")。
 
-只做**健康因果链**,严守以下三条,否则该工具会失真:
-6. **不要重复或近似重复**:同一条"行动→决定因素→健康结果"机制只保留**一条**最完整的;
-   不要把同一机制换个措辞重复列,也不要为凑数把一条拆成多条近义路径。
-7. **只展开健康因果链,不要做政策设计点评**:像"有效期短/不可持续""罚款收入用途""监管是否到位"
-   "信息是否公开"这类**不是**经由健康决定因素到健康结果的因果链,**一律不要列**。
-8. **strength 从严,宁低不高**:机制确凿、有广泛文献或常识支撑 → "强";一般合理 → "中";
-   凡依赖较多假设、量级不明、或属间接猜测 → **"推测"**。绝不可把推测标成"中/强"。
-9. 路径**总数从严控制(通常 ≤12 条)**,只列把握高、与健康有实质关联的;**不为求全面而堆砌
-   推测性、脆弱群体细分、二/三级猜测路径**。少而准 >> 多而杂;关联弱的政策本就该极少甚至为 0。
+哪些危害值得列(决定取舍):
+A. **有措施缺口的危害**(政策"未提及"或"不足"控制措施)——**这是核心**。常规危害(施工扬尘/噪声/
+   交通安全、运营污染等)**若政策未要求相应控制措施则必列**,并给建议措施;**若政策已含充分措施
+   则不必单列**(可不列)。
+B. **引入显著新危害**:规模大/难缓解/有特定毒害的污染、危化品、放射、职业病、传染病传播条件等。
+C. **削减保护因素**(常被忽视,重点找):占用绿地、降医保/卫生投入、削弱服务可及、拆迁破坏社区
+   网络、压缩公共空间、放松既有防护标准。
+D. **扩大健康不公平**:使脆弱群体(老人/儿童/孕产妇/低收入/慢病/户外劳动者)相对受损更多。
+E. **非显而易见的间接危害**:政策的非预期副作用。
 
-每条路径落到下面 10 个结果问题之一(outcome_q 取 1–10):
+门控(先判该不该展开危害,守"假阳>漏报"):
+0a. **效益型/民生型政策(减排/降碳/绿地/健身/医疗可及提升等)的正面影响不输出**;但仍审视其
+    **非预期的不利侧面**(施工/过渡/运营期危害、对某些群体的挤出),有则列、无则返回空。
+0b. **纯经济/管理/数据/金融/程序类政策**(价格/定价/交易/税费/统计/数据互联/基金REITs/信贷/
+    认定评审/行政程序),不引入实体环境或人群行为的实际改变 → 不利影响**返回空或极少(≤1)**。
+    必须真正落到**中间性健康决定因素**(物质环境/行为/社会心理/卫生服务)才成立;只停在
+    "影响成本/收入/效率/价格"等结构性层面 → 不算,返回空。**宁缺勿造,绝不硬凑危害。**
+
+展开要求:
+1. **多视角审视**,别漏:{"、".join(LENSES)}。
+2. **沿健康决定因素逐层**(可 2–3 级串联):\n{DETERMINANTS}
+3. **重视间接危害**:如"货运增加→噪声/道路阻隔→体力活动下降→慢病";"拆迁→社区网络破坏→心理压力"。
+4. **每条 chain 完整写出各级节点**,首节点用提炼的简短动作,原文逐字摘录放 evidence 字段。
+5. **不重复**:同一危害机制只保留一条最完整的,不换措辞重复、不拆成多条近义。
+6. **不做政策设计点评**(有效期/罚款/监管是否到位/信息是否公开),只列经健康决定因素到不利
+   健康结果的危害链。
+7. **strength 从严**:机制确凿+广泛证据→"强";一般合理→"中";依赖较多假设/量级不明/间接猜测→"推测"。
+8. 总数从严(通常 ≤8 条),只列把握高的**真实危害**;**绝不为凑数或求全而硬造危害**。
+   纯效益/关联弱的政策本就应为 0 条。
+
+每条落到下面 10 题之一(outcome_q 取 1–10,**均为"可能带来不利影响"**):
 {_q_block()}
 
 只输出 JSON:{{"pathways":[{{
- "action_id":"A1","chain":["行动→决定因素→…→健康结果 的逐级节点(2–4 个)"],
- "outcome_q":2,"direction":"风险|效益","population":"受影响人群(尤其脆弱群体)",
+ "action_id":"A1","chain":["行动→决定因素→…→不利健康结果 的逐级节点(2–4 个)"],
+ "outcome_q":3,"direction":"风险","population":"受影响人群(尤其脆弱群体)",
  "lens":"{LENSES[0]}等四视角之一","strength":"强|中|推测",
+ "mitigation":"已含|不足|未提及","measures":"建议的缓解/控制措施(具体可操作,1–2 条)",
  "status":"文档支持|路径库/文献|假设待证","evidence":"文档原文或机制依据(假设则简述)","confidence":0.0
 }}]}}
-chain 用简短中文节点;strength 反映路径成立的把握;status 标依据来源。"""
+direction 一律为"风险"(本工具只筛不利影响);无真实不利影响则 pathways 返回空数组。"""
 
 
-def expand_pathways(actions, doc_text, key, fallback=False):
+def expand_pathways(actions, doc_text, key, fallback=False, template_hints=""):
     alist = "\n".join(f"{a['id']}: {a['action']}" for a in actions)
-    extra = ("\n注:本政策仅给出主题、未逐条枚举行动。请**直接依据文档内容**展开主要健康影响路径,"
+    extra = ("\n注:本政策仅给出主题、未逐条枚举行动。请**直接依据文档内容**识别主要**不利健康影响**,"
              "把握高的优先。**但仍须先过第 0b 关**:若文档实质属纯价格/定价/交易/结算/成本监审/"
              "财务/税费/统计分类/数据互联/金融(基金/REITs/信托)/资质认定/评审/行政程序类,"
-             "**不引入实体环境或人群行为改变**,则照常返回空或极少(≤1),不要因本提示而硬凑;"
-             "只有确为建设/产业/能源/生态/环境/交通/住房等实体政策才系统展开若干条。" if fallback else "")
-    user = (f"【行动清单】\n{alist}\n\n【评估对象文档(供引用原文)】\n{doc_text[:25000]}\n\n"
+             "**不引入实体环境或人群行为改变**,则照常返回空或极少(≤1),不要因本提示而硬凑危害;"
+             "只有确为建设/产业/能源/生态/环境/交通/住房等实体政策、且确有不利侧面才列。" if fallback else "")
+    # 模板提示(首段蒸馏产物;仅作受约束生成的参考,不改变门控/从严铁律)
+    hint = ("\n【已验证因果模式参考(来自历史政策蒸馏,仅供参考)】\n" + template_hints +
+            "\n适用才套用、严守强度从严;不适用请忽略,**绝不为套用模式而硬展开**。\n"
+            if template_hints else "")
+    user = (f"【行动清单】\n{alist}\n\n【评估对象文档(供引用原文)】\n{doc_text[:25000]}\n{hint}\n"
             f"请对每个行动展开多视角因果路径。{extra}只输出 JSON。")
     data = _chat_json(_SYS_EXPAND, user, key, max_tokens=6000)
     return data.get("pathways") or []
 
 
 # ============ ③ 完整性批判 + 小结 ============
-_SYS_CRITIC = f"""你是 HIA 完整性审稿人。给定行动与已展开路径,**仅在确有"重要且把握较高"的遗漏时才补充**。
+_SYS_CRITIC = f"""你是 HIA 危害筛查审稿人。给定行动与已识别的**不利影响**路径,**仅在确有"重要且把握较高"
+的遗漏危害时才补充**。同样**只补危害、不补效益**(direction 只用"风险")。
 
 克制铁律(最重要,优先于"求全"):
-- **默认不补**。展开阶段通常已足够;**added 多数情况下应为空,确需补充也一般 0–3 条。**
-- **绝不为"求全面"补推测性、脆弱群体细分、二/三级猜测、隐含假设路径**——这类正是要避免的假阳性噪声。
-- 只补**确实重要、机制把握高(强/中)**的真实遗漏;依赖较多假设的一律**不补**。
+- **默认不补**。识别阶段通常已足够;**added 多数情况下应为空,确需补充也一般 0–3 条。**
+- **绝不为"求全面"补推测性、脆弱群体细分、二/三级猜测、隐含假设的危害**——这类正是要避免的假阳性噪声。
+- 只补**确实重要、机制把握高(强/中)的真实不利影响**(尤其易被漏掉的:削减保护因素、扩大健康
+  不公平、施工/过渡/运营期危害);依赖较多假设的一律**不补**。
 - 不重复/近似已有路径;不把政策设计点评(有效期/罚款/监管/信息公开)当路径。
-- 若该政策本身与健康关联很弱(行动非健康类),**added 返回空**,summary 如实说明"与健康关联很弱"。
+- 若该政策**无实质不利健康影响**(纯效益/民生/纯经济程序类),**added 返回空**,summary 如实说明
+  "未见明显不利健康影响"(不要因为政策有好处就夸大成有危害)。
 
-给一段中立、克制、**如实反映关联强弱(不夸大)**的整体研判小结,以及健康影响程度建议。
+给一段中立、克制、**如实反映不利影响强弱(不夸大)**的整体研判小结,以及健康影响程度建议。
 
-只输出 JSON:{{"added":[{{"action_id":"A1","chain":[...],"outcome_q":7,"direction":"风险|效益",
+只输出 JSON:{{"added":[{{"action_id":"A1","chain":[...],"outcome_q":7,"direction":"风险",
  "population":"...","lens":"...","strength":"强|中|推测","status":"...","evidence":"...","confidence":0.0}}],
- "summary":"2–4 句整体研判小结","suggest_level":"很小|轻度|重大","notes":"仍需专家补充核实的关键缺口"}}"""
+ "summary":"2–4 句整体研判小结(聚焦不利影响)","suggest_level":"很小|轻度|重大","notes":"仍需专家补充核实的关键缺口"}}"""
 
 
 def critique_augment(actions, pathways, key):
@@ -331,12 +349,15 @@ def _norm_pathways(raw, action_ids, start=1):
             conf = max(0.0, min(1.0, float(p.get("confidence", 0))))
         except Exception:
             conf = 0.0
+        mit = str(p.get("mitigation", "") or "").strip()
+        mit = mit if mit in ("已含", "不足", "未提及") else "未提及"   # 缺省按"措施缺口"保守处理
         out.append({
             "id": f"P{pid}", "action_id": aid, "chain": chain, "outcome_q": q,
             "direction": ("效益" if str(p.get("direction", "")).strip() == "效益" else "风险"),
             "population": str(p.get("population", "") or "").strip(),
             "lens": str(p.get("lens", "") or "").strip(),
-            "strength": st, "status": status,
+            "strength": st, "status": status, "mitigation": mit,
+            "measures": str(p.get("measures", "") or "").strip(),
             "evidence": str(p.get("evidence", "") or "").strip(), "confidence": conf,
         })
         pid += 1
@@ -345,26 +366,41 @@ def _norm_pathways(raw, action_ids, start=1):
 
 # ============ 代码确定性聚合到 10 题 ============
 def compute_items(pathways):
-    """由(已采纳的)路径确定性聚合出 10 题判定。判断阈值在代码里,不交给 LLM。
-    规则:有「强/中」且依据非纯假设的路径 → 是;仅「推测/假设待证」路径 → 不知道;无路径 → 否。"""
+    """由(已采纳的)危害路径确定性聚合出 10 题判定。判断阈值在代码里,不交给 LLM。
+    ★初筛表 10 题均为"可能带来不利影响"——是【危害筛查】,且 HIA 落点是【措施】。故:
+      有「强/中」危害且**政策措施缺口(未提及/不足)** → 是(需关注,给建议措施);
+      有「强/中」危害但**政策已含控制措施** → 否(已控,旁注);
+      仅「推测」危害 → 不知道;无危害 → 否。
+    (效益路径不计入——analyze 已在上游过滤掉。)"""
     items = []
     for q in range(1, len(QUESTIONS) + 1):
-        ps = [p for p in pathways if p["outcome_q"] == q]
+        ps = [p for p in pathways
+              if p["outcome_q"] == q and p.get("direction") == "风险"]
         firm = [p for p in ps if p["strength"] in ("强", "中") and p["status"] != "假设待证"]
-        if firm:
+        gap = [p for p in firm if p.get("mitigation") in ("未提及", "不足")]
+        if gap:                                   # 有危害且措施缺口 → 需关注
             ans = "是"
-            conf = max(p["confidence"] for p in firm) if firm else 0.0
-        elif ps:
+            conf = max(p["confidence"] for p in gap)
+        elif firm:                                # 有危害但政策已含措施 → 已控
+            ans = "否"
+            conf = max(p["confidence"] for p in firm)
+        elif ps:                                  # 仅推测危害
             ans = "不知道"
             conf = max(p["confidence"] for p in ps)
         else:
             ans = "否"
             conf = 0.0
-        gaps = ""
-        if ans == "不知道":
-            gaps = "需核实:" + ";".join(" → ".join(p["chain"]) for p in ps[:3])
+        note = ""
+        if gap:                                   # "是"时给出建议措施(HIA 交付物)
+            note = "措施缺口·建议:" + ";".join(
+                "%s〔%s〕" % (" → ".join(p["chain"][-2:]), p.get("measures", "") or "待补")
+                for p in gap[:3])
+        elif firm:
+            note = "已识别风险但政策已含控制措施(已控)"
+        elif ps:
+            note = "需核实:" + ";".join(" → ".join(p["chain"]) for p in ps[:3])
         items.append({"q": q, "answer": ans, "confidence": conf,
-                      "n_path": len(ps), "gaps": gaps})
+                      "n_path": len(ps), "gaps": note})
     return items
 
 
@@ -436,9 +472,11 @@ def suggest_level_from(items):
 
 
 # ============ 编排:一次完整分析(3 次调用)============
-def analyze(doc_text, key, project_name="", progress=None):
+def analyze(doc_text, key, project_name="", progress=None, hint_builder=None):
     """返回 {actions, pathways, items, summary, suggest_level, notes}。
-    progress(stage:str) 可选回调,用于页面显示进度。"""
+    progress(stage:str) 可选回调,用于页面显示进度。
+    hint_builder(actions)->str 可选:抽出行动后构建"模板提示"注入展开阶段(首段蒸馏实验用,
+    默认 None=原行为不变)。"""
     def _p(s):
         if progress:
             progress(s)
@@ -466,19 +504,25 @@ def analyze(doc_text, key, project_name="", progress=None):
         actions = [{"id": "A1", "action": topic, "evidence": ""}]
     aids = [a["id"] for a in actions]
 
-    _p("② 多视角展开因果路径…")
-    raw = expand_pathways(actions, doc_text, key, fallback=fallback_used)
+    hints = ""
+    if hint_builder:
+        try:
+            hints = hint_builder(actions) or ""
+        except Exception:
+            hints = ""
+    _p("② 多视角识别不利健康影响…")
+    raw = expand_pathways(actions, doc_text, key, fallback=fallback_used, template_hints=hints)
     paths = _norm_pathways(raw, aids, start=1)
-    # 安全网:已判健康相关、抽出多条具体行动,展开却 0 路径——多为技术细则型减排政策
-    # (煤电升级/储能/节能降碳:行动被抽成工程指标,被逐行动门控误杀)。从政策整体重展开一次。
-    if not paths and not fallback_used and len(actions) >= 3:
-        _p("②b 行动均为技术指标,按政策目标整体重展开…")
-        raw = expand_pathways(actions, doc_text, key, fallback=True)
-        paths = _norm_pathways(raw, aids, start=1)
+    # 注:旧"0 路径→整体重展开"安全网已停用——转向危害筛查后,效益型(减排/民生)政策
+    # 本就常无不利影响路径(0 条是正确结果),强行重展开会硬造危害(假阳),故不再触发。
 
     _p("③ 完整性批判与补全…")
     added, summary, level, notes = critique_augment(actions, paths, key)
     paths += _norm_pathways(added, aids, start=len(paths) + 1)
+    # ★只保留【危害(不利影响)】路径:初筛表是危害筛查,效益不暴露、不计入判定。
+    paths = [p for p in paths if p.get("direction") == "风险"]
+    for i, p in enumerate(paths, 1):       # 过滤后重新编号 P1、P2…
+        p["id"] = f"P{i}"
     _p("④ 匹配证据来源…")
     hia_evidence.annotate(paths)            # 仅用确定性关键词匹配(精准、可审计、可复现)
     # 注:已停用 map_evidence() 的 LLM 语义匹配——它会把同题号但机制不相干的卡片

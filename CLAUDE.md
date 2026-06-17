@@ -123,14 +123,60 @@
 - **语料采集器 `eval/hia_policy_crawler.py`**(自包含,可移植):从 gov.cn 政策文件库(t=zhengcelibrary_bm)按部门白名单定向抓取,仅收 pdf/docx、每部门配额、断点续传、出 `_index.xlsx`。**关键修复 lxml→html.parser**——gov.cn 详情页 HTML 不规范,lxml 会截断丢正文(UCAP-CONTENT/pages_content 取 0 字),html.parser 才正常。已验证通过(test2 抓首批 4 份:社区卫生/生育友好/节能降碳/新能源重卡,正好补发改委集缺的维度)。**另一台机:装依赖+改 OUT_DIR 一行即可跑**。
 - ⚠ **改的是引擎核心提示词,线上未更新**:需 `git push` → 服务器 `git pull && systemctl restart hia` 才生效。
 
+## 本会话新增(2026-06-17/18:★危害转向 + CSDH词表 + 蒸馏飞轮 + flash/pro)
+本会话是**方法学层面的大重构**,把工具从"穷举健康路径"扭到"做真正的 HIA(危害筛查 + 措施建议)"。
+未上线(改的是引擎核心提示词/逻辑,需 `git push` → 服务器 `git pull && systemctl restart hia`)。
+
+- **语料库 `E:\projects\test2`(本机,gitignore)**:用 `eval/hia_policy_crawler.py`(加 UTF-8 修复 + `CRAWL_ALL`
+  全部门 facet 模式)抓 gov.cn 全 77 部门、**5213 份唯一政策**;主文件去多附件(二级移 `_extra/`)。
+- **★危害转向(核心,`hia_screen.py`)**:发现引擎旧版**97.5% 生成"效益"路径**,而初筛表 10 题**全是
+  "可能带来不利影响"**——方向完全错配,且 `compute_items` 把效益也算成"是(有不利影响)"=逻辑 bug。
+  改:① 只筛**危害**(analyze 过滤掉 direction≠风险 的路径、重编号;compute_items 只由危害驱动);
+  ② `_SYS_EXPAND`/`_SYS_CRITIC` 重写为危害导向;③ 停用旧"0路径→整体重展开"安全网(效益政策本就常 0 危害)。
+- **★措施缺口 + 建议措施(HIA 落点)**:发现问题不是目的、提措施才是;常规危害(施工扬尘)"有措施才不
+  成风险,政策没要求就成真危害"。故每条危害产出**三件套**:危害路径 + `mitigation`(已含/不足/未提及)
+  + `measures`(建议措施);**"是"由"有措施缺口的危害"驱动**(已含措施=已控=否)。验证:农村公路→
+  施工/运营/交通/职业 4 类危害 + 各自建议措施,而效益型(全民健身)/程序类→0。
+- **决定因素枢纽词表 `determinants.py`(框架驱动)**:按 **WHO CSDH 框架**(物质环境/行为生物/社会心理/
+  卫生系统 四类中间性 + 结构性"非触发" + 脆弱人群正交)从框架原文(读 `9789241500852` WHO 文件)+
+  WHO/GBD 环境职业风险导出 39 枢纽,**破除"卡片反推枢纽"**(卡退为挂枢纽的证据,缺卡=待补不删枢纽)。
+  `chain_triggers` = CSDH 门控:**必须穿到中间性决定因素才成路径**,经济类政策假阳有了理论根基。
+  (ID-join 地基已铺:`resolve()/outcomes_of()`;末段证据匹配从关键词换 ID-join 是后续。)
+- **数据集**:`eval/auto_label.py`(HIA对象初筛 policy/program/project/none + **危害口径** A/B/X,原子写)
+  全量标 5213 → 危害口径下 HIA对象 3411 内 A(有潜在危害)仅~48、B 占 98%(危害本就稀)。
+  `eval/make_split.py` 按 部门×标签 切 80/20(开发池/留出集,留出集=无偏考场)。**注:危害标注偏保守、
+  与引擎"措施缺口"口径需再校准;eval 真值更应走"pro 逐路径审"而非粗标。**
+- **蒸馏飞轮(脚手架全建)**:`cross_check.py`(候选⇄审核;后端可选 anthropic 或 **deepseek**)、
+  `cluster_templates.py`/`build_templates.py`(按 (枢纽,题,方向) 聚类出模板)、`template_retrieval.py`
+  (bge-small-zh 向量检索,阈值~0.6 分流)、`prune_critic.py`(确定性剪枝)。
+- **模型分工(省钱)**:**生成 = deepseek-v4-flash(`hia_screen.MODEL`,env `DEEPSEEK_MODEL` 可覆盖);
+  审核 = deepseek-v4-pro(`cross_check` 设 `CROSS_BACKEND=deepseek CROSS_MODEL=deepseek-v4-pro`)**。
+  不再用 Claude API 做常规审计(贵)。Claude 仅作一次性金标准/会话内抽检。
+- **关键实验结论(写下来免重走弯路)**:
+  · **模板"提示注入"展开 = 没用甚至变差**(留出集:精确率 0.57 vs 基线 0.62,候选反升、B假阳↑)——
+    提示是加法,治不了"过度生成";引擎瓶颈在精确率不在召回。→ 改用**剪枝(减法)**。
+  · **确定性剪枝(删 strength=推测 + 删长链≥5)** → 精确率 0.62→0.75/0.80、召回 0.97,**零 API、可复现**。
+    特征分析:推测路径 91% 该删、长链 62% 该删;模板支持度/门控/去重不区分。
+  · **DeepSeek 自审太松(护短)**:对照 Claude 金标准,垃圾抓回率仅 0.43(漏掉 57% 该删的);
+    但用更强的 **v4-pro 审 v4-flash** 是"强审弱",缓解护短(冒烟:pro 抓出"硬造危害")。
+  · **272 人工裁定(`eval/adjudication_*`)**:Claude删 vs DeepSeek留 的 272 分歧,Opus 会话内逐条预判,
+    与 Claude 一致~91%;挖出**截断 bug**(40k 截断致审计员把真实条目误判"幻觉")+ 绿色金融目录 22 条存疑。
+- **跨机工作流补充**:eval 运行时产物(`out_*/cc_*/crosscheck/*.npz/*.log/_*`)已 gitignore;
+  入库的金标准 = `labels_auto.json`、`determinants.py`、`adjudication_*`。
+
 ## 待办 / 进行中
 1. **域名 + HTTPS**:`tjhealthycitylab.com` 备案通过后,按 `docs/DEPLOY_HTTPS.md` 配 `hia.` 子域名 DNS+Nginx+HTTPS。
 2. **知识库扩充**(进行中):用户在 `std.samr.gov.cn` 按 `docs/gb_standards_shoplist.md` / `standards_master_list.md` 取证;拿到**现行编号+URL** 后加进 `hia_evidence.py` 的 `CARDS` + 配 `_SYN_GROUPS` + 跑 `eval` 验证。
 3. **实验室门户**:补真实内容 → 建 git 仓库 → 备案后挂主域名。
 4. **分析平台部署**:hia_demo 部署到实验室真机(校内/内部)或阿里云(若升配);先原样搬,UI 后议。
-5. **安全收尾**:DeepSeek key 明文出现过,**需轮换**(改 `/etc/hia-screening.env` 后 `systemctl restart hia`);实验室服务器 **SSH 密码需改**;安全组从 `0.0.0.0/0` 收紧。
+5. **安全收尾**:DeepSeek key **及本会话明文出现的 Anthropic key 都需轮换**(改 `/etc/hia-screening.env` / `.streamlit/secrets.toml` 后重启);实验室服务器 **SSH 密码需改**;安全组从 `0.0.0.0/0` 收紧。
 6. **可选功能**:项目台账状态流转、角色/权限、监管看板、站内推送。
-7. **引擎判定优化 + 评测集扩充**(进行中):用 `eval/hia_policy_crawler.py` 在另一台机按 `sampling_plan.md` 抓多部门语料(卫健/生态环境/住建/市场监管/交通/民政等)→ 汇总后 `precheck` + `labels.py` 标注 → 并入均衡基准重跑基线。引擎优化按复核报告六条 ROI 推进(下一步 `policy_type` 代码硬门控 / RAG 知识库)。
+7. **★危害转向收尾(进行中,本会话核心)**:
+   - **产品侧**:`build_screen_docx`/界面要展示每条危害的 `mitigation`(措施缺口)+ `measures`(建议措施)——这是 HIA 交付物,目前引擎已产出但前端/docx 还没渲。
+   - **危害+措施模板蒸馏**:用校准好的引擎(flash)在候选政策上跑 → pro 审 → 聚类**危害+措施模板库**(替代已归档的效益期 `_benefit_era/`)。
+   - **评测真值校准**:危害粗标偏保守、与"措施缺口"口径有差;改以 **pro 逐路径审**为真值,在留出集上量危害识别的精确/召回 + "硬造危害"假阳率。
+   - **上线**:危害转向 + flash/pro 需 `git push` → 服务器 `git pull && systemctl restart hia` 才生效(线上仍是旧效益版 deepseek-chat)。
+8. **末段 ID-join**:`hia_evidence.match` 从关键词 substring 换成按 `determinants` 枢纽 ID 精确 join(已验证召回↑精度↑);证据卡补 hub_id 字段。
 
 ## 跨机器工作流
 - **开工** `git pull`;**收工** `git add -A && git commit -m "..." && git push`。

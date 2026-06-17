@@ -11,17 +11,28 @@
 复核重点(见 eval/REVIEW_GUIDE.md):文档锚定?机制合理?强度是否过/欠?是否拿健康证据
 冒充中间环节?有无重要遗漏或幻觉?
 """
+import concurrent.futures as cf
 import glob
+import io
 import json
 import os
 import sys
+import threading
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import hia_screen as hs  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POLICY_DIR = os.path.join(ROOT, "eval", "policies")
-OUT_DIR = os.path.join(ROOT, "eval", "out")
+# 输出目录可经 EVAL_OUT 覆盖(大集重建基线时用独立目录,不污染旧 out/)
+OUT_DIR = os.path.join(ROOT, os.environ.get("EVAL_OUT", os.path.join("eval", "out")))
+# 并发度:默认 1(串行,旧行为);大集设 EVAL_WORKERS=8 提速
+WORKERS = max(1, int(os.environ.get("EVAL_WORKERS", "1")))
+_print_lock = threading.Lock()
 
 
 def get_key():
@@ -86,6 +97,65 @@ def to_md(r):
     return "\n".join(L)
 
 
+def _done(base):
+    """已有有效 json 产物则跳过(断点续跑)。"""
+    p = os.path.join(OUT_DIR, base + ".json")
+    if not os.path.exists(p):
+        return False
+    try:
+        json.load(open(p, encoding="utf-8"))
+        return True
+    except Exception:
+        return False
+
+
+def _process(f, key, i, total):
+    base = os.path.splitext(os.path.basename(f))[0]
+    if _done(base):
+        with _print_lock:
+            print(f"[{i}/{total}] 跳过(已有) {base[:46]}")
+        return None
+    try:
+        r = run_one(f, key)
+    except Exception as ex:                               # noqa: BLE001
+        with _print_lock:
+            print(f"[{i}/{total}] 失败 {base[:40]}: {ex}")
+        return None
+    with open(os.path.join(OUT_DIR, base + ".json"), "w", encoding="utf-8") as fp:
+        json.dump(r, fp, ensure_ascii=False, indent=2)
+    with open(os.path.join(OUT_DIR, base + ".md"), "w", encoding="utf-8") as fp:
+        fp.write(to_md(r))
+    np = 0 if r.get("error") else len(r["res"]["pathways"])
+    with _print_lock:
+        print(f"[{i}/{total}] {'解析失败' if r.get('error') else f'路径{np}'}  {base[:42]}")
+    return None
+
+
+def _build_summary(files):
+    summary = ["# 批量内测汇总\n",
+               "| 政策 | 措施数 | 路径数 | 健康端有据 | 证据待补 | 待补占比 |",
+               "|---|---|---|---|---|---|"]
+    for f in files:
+        base = os.path.splitext(os.path.basename(f))[0]
+        p = os.path.join(OUT_DIR, base + ".json")
+        if not os.path.exists(p):
+            continue
+        try:
+            r = json.load(open(p, encoding="utf-8"))
+        except Exception:
+            continue
+        if r.get("error"):
+            continue
+        ps = r["res"]["pathways"]
+        n_src = sum(1 for p_ in ps if p_.get("cards"))
+        n_gap = len(ps) - n_src
+        ratio = f"{(n_gap/len(ps)*100):.0f}%" if ps else "—"
+        summary.append(f"| {base} | {len(r['res']['actions'])} | {len(ps)} | "
+                       f"{n_src} | {n_gap} | {ratio} |")
+    with open(os.path.join(OUT_DIR, "_SUMMARY.md"), "w", encoding="utf-8") as fp:
+        fp.write("\n".join(summary) + "\n")
+
+
 def main():
     key = get_key()
     if not key:
@@ -96,33 +166,28 @@ def main():
                    + glob.glob(os.path.join(pol_dir, "*.docx")))
     if not files:
         sys.exit(f"没找到待测文件。请把政策 PDF/.docx 放进 {pol_dir}")
-    print(f"待测 {len(files)} 份(目录:{pol_dir})。")
-    summary = ["# 批量内测汇总\n",
-               "| 政策 | 措施数 | 路径数 | 健康端有据 | 证据待补 | 待补占比 |",
-               "|---|---|---|---|---|---|"]
-    for f in files:
-        print("分析中:", os.path.basename(f), "…")
-        try:
-            r = run_one(f, key)
-        except Exception as ex:                          # noqa: BLE001
-            print("  失败:", ex)
-            continue
-        base = os.path.splitext(os.path.basename(f))[0]
-        with open(os.path.join(OUT_DIR, base + ".json"), "w", encoding="utf-8") as fp:
-            json.dump(r, fp, ensure_ascii=False, indent=2)
-        with open(os.path.join(OUT_DIR, base + ".md"), "w", encoding="utf-8") as fp:
-            fp.write(to_md(r))
-        if not r.get("error"):
-            ps = r["res"]["pathways"]
-            n_src = sum(1 for p in ps if p.get("cards"))
-            n_gap = len(ps) - n_src
-            ratio = f"{(n_gap/len(ps)*100):.0f}%" if ps else "—"
-            summary.append(f"| {base} | {len(r['res']['actions'])} | {len(ps)} | "
-                           f"{n_src} | {n_gap} | {ratio} |")
-        print("  →", os.path.join("eval", "out", base + ".md"))
-    with open(os.path.join(OUT_DIR, "_SUMMARY.md"), "w", encoding="utf-8") as fp:
-        fp.write("\n".join(summary) + "\n")
-    print("完成。汇总见 eval/out/_SUMMARY.md;逐条报告 eval/out/*.md,请给我复核。")
+    # 可选 manifest:只跑清单里的文件(json:{name:...} 或 [name,...];name=无扩展名)
+    mani = os.environ.get("EVAL_MANIFEST", "").strip()
+    if mani:
+        m = json.load(open(os.path.join(ROOT, mani) if not os.path.isabs(mani) else mani,
+                            encoding="utf-8"))
+        want = set(m.keys() if isinstance(m, dict) else m)
+        files = [f for f in files if os.path.splitext(os.path.basename(f))[0] in want]
+        print(f"[manifest] {mani} → 只跑 {len(files)} 份")
+    total = len(files)
+    todo = sum(0 if _done(os.path.splitext(os.path.basename(f))[0]) else 1 for f in files)
+    print(f"待测 {total} 份(目录:{pol_dir});待跑 {todo} 份;并发 {WORKERS};输出 {OUT_DIR}")
+    if WORKERS <= 1:
+        for i, f in enumerate(files, 1):
+            _process(f, key, i, total)
+    else:
+        with cf.ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            futs = [ex.submit(_process, f, key, i, total)
+                    for i, f in enumerate(files, 1)]
+            for _ in cf.as_completed(futs):
+                pass
+    _build_summary(files)
+    print(f"完成。汇总见 {os.path.join(OUT_DIR, '_SUMMARY.md')};逐条报告 {OUT_DIR}/*.md。")
 
 
 if __name__ == "__main__":

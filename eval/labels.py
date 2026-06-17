@@ -8,7 +8,21 @@
 规则:按 C → X → A 顺序匹配文件名关键词,**默认 B**。匹配=关键词为文件名子串。
 判定阈值:出路径 = len(pathways) ≥ 1;假阳 = B 类却 ≥ FALSE_POS_MIN 条。"""
 
+import json as _json
+import os as _os
+
 FALSE_POS_MIN = 2          # B 类出 ≥2 条路径视为假阳(容 1 条噪声)
+
+# 大集模式:auto_label.py 产的 labels_auto.json 优先(键=文件名无扩展 → {"label",...})。
+# 缺该文件时回落到下方旧 100 份发改委关键词规则,完全向后兼容。
+_AUTO = {}
+_AUTO_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "labels_auto.json")
+if _os.path.exists(_AUTO_PATH):
+    try:
+        _AUTO = {k: (v.get("label") if isinstance(v, dict) else v)
+                 for k, v in _json.load(open(_AUTO_PATH, encoding="utf-8")).items()}
+    except Exception:
+        _AUTO = {}
 
 C_KEYS = [                 # 抽取失败/扫描/极短(跳过)
     "政府粮食储备安全风险",
@@ -38,7 +52,9 @@ A_KEYS = [                 # 正样本:应有路径,漏=假阴
 
 
 def expect(name):
-    """文件名(不含扩展名)→ 期望标签 A/B/X/C。"""
+    """文件名(不含扩展名)→ 期望标签 A/B/X/C。优先 labels_auto.json,再回落关键词规则。"""
+    if name in _AUTO and _AUTO[name] in ("A", "B", "X", "C"):
+        return _AUTO[name]
     for k in C_KEYS:
         if k in name:
             return "C"

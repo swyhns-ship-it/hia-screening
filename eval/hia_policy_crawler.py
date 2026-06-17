@@ -24,6 +24,12 @@ import random
 import sys
 import requests
 from urllib.parse import urljoin
+
+# Windows 控制台/重定向默认 GBK,政策标题含   等字符会让 print 崩溃 → 强制 UTF-8
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 from bs4 import BeautifulSoup
 from docx import Document
 from openpyxl import Workbook
@@ -49,12 +55,18 @@ WHITELIST = [
 # ④ 每部门配额(有附件/无附件各占一半);白名单 9 部门 × 默认 6 ≈ 54 份
 QUOTA_PER_DEPT = int(sys.argv[1]) if len(sys.argv) > 1 else 6
 
+# 大集模式:env CRAWL_ALL=1 → 实时拉 gov.cn 全部门 facet,自动排除下面已抓的 9 个,
+# 抓其余所有部门(广覆盖)。默认关闭,保持 9 部门 WHITELIST 原行为。
+CRAWL_ALL = os.environ.get("CRAWL_ALL", "") not in ("", "0", "false", "False")
+DONE_DEPTS = set(WHITELIST)   # 已抓过、CRAWL_ALL 时跳过的部门(= 上面 9 部门)
+
 # ③ 只收引擎支持的格式
 ATT_EXT = (".pdf", ".docx")
 
 SLEEP        = (0.6, 1.4)     # 每请求节流,礼貌爬
-MAX_PAGE     = 30            # 单部门最多翻页,死循环保护
-NO_NEW_BREAK = 3            # 连续 N 页无新增就停
+MAX_PAGE     = 60            # 单部门最多翻页,死循环保护(1000份大集:30→60够翻完大部门)
+NO_NEW_BREAK = 4            # 连续 N 页无新增就停
+BALANCE_ATT_TXT = False      # 1000份大集:关掉"有附件/无附件各半"内部配额,防大部门凑不满
 TEXT_FALLBACK_MINLEN = 120   # 无附件时,正文≥此长度才转 docx
 # ===================================================================
 
@@ -81,6 +93,22 @@ def safe_name(s, maxlen=70):
     s = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", s or "untitled")
     s = re.sub(r"\s+", " ", s).strip()
     return s[:maxlen]
+
+
+def fetch_all_departments():
+    """从 gov.cn bmfl facet 实时拉全部门名(按文件数降序)。"""
+    params = dict(t=T, q="", sort="pubtime", sortType="1", searchfield="title",
+                  p="1", n="1", type=TYPE)
+    r = session.get(API, params=params, timeout=30)
+    r.raise_for_status()
+    bmfl = r.json().get("searchVO", {}).get("extendresult", {}) \
+            .get("facetMap", {}).get("bmfl", {}) or {}
+    def num(v):
+        m = re.search(r"\d+", str(v))
+        return int(m.group()) if m else 0
+    depts = sorted(((k, num(v)) for k, v in bmfl.items() if k != "count"),
+                   key=lambda x: -x[1])
+    return [k for k, _ in depts]
 
 
 def fetch_list_page(dept, page, n=50):
@@ -186,17 +214,27 @@ def write_index(rows):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    print(f"定向采集 {len(WHITELIST)} 个部门,每部门约 {QUOTA_PER_DEPT} 份 → {OUT_DIR}\n")
+    if CRAWL_ALL:
+        whitelist = [d for d in fetch_all_departments() if d not in DONE_DEPTS]
+        print(f"[CRAWL_ALL] 全部门模式:抓 {len(whitelist)} 个新部门"
+              f"(已排除 {len(DONE_DEPTS)} 个已抓),每部门约 {QUOTA_PER_DEPT} 份 → {OUT_DIR}\n")
+    else:
+        whitelist = WHITELIST
+        print(f"定向采集 {len(whitelist)} 个部门,每部门约 {QUOTA_PER_DEPT} 份 → {OUT_DIR}\n")
 
     state = load_progress()
     seen_urls = set(state["seen_urls"])
     rows = state["rows"]
     count = len(rows)
 
-    for dept in WHITELIST:
+    for dept in whitelist:
         got, page, no_new = 0, 1, 0
         half = max(1, QUOTA_PER_DEPT // 2)
-        cap_att, cap_txt, got_att, got_txt = half, QUOTA_PER_DEPT - half, 0, 0
+        if BALANCE_ATT_TXT:
+            cap_att, cap_txt = half, QUOTA_PER_DEPT - half
+        else:
+            cap_att = cap_txt = QUOTA_PER_DEPT
+        got_att, got_txt = 0, 0
         while got < QUOTA_PER_DEPT and page <= MAX_PAGE:
             try:
                 items, _ = fetch_list_page(dept, page); nap()

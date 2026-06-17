@@ -1,0 +1,1130 @@
+{
+ "_meta": "Opus 4.8 在会话内对 272 分歧的预判;v=drop/keep(相对该路径该不该留),agree=C(同Claude删)/DS(同DeepSeek留),note 仅标可议项。人工复核覆盖此预判。",
+ "161": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "162": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "163": {
+  "v": "drop",
+  "agree": "C",
+  "note": "生态系统服务链较长,可议但偏过度伸展"
+ },
+ "164": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "165": {
+  "v": "drop",
+  "agree": "C",
+  "note": "反向归因(培训非引人入高危职业)"
+ },
+ "166": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "167": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "168": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "169": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "170": {
+  "v": "drop",
+  "agree": "C",
+  "note": "Claude幻觉判得好:原文无'引入医疗资源'表述"
+ },
+ "171": {
+  "v": "drop",
+  "agree": "C",
+  "note": "同170,引擎自行添加医疗资源"
+ },
+ "172": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "173": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "174": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "175": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "176": {
+  "v": "drop",
+  "agree": "C",
+  "note": "方向也错(应危害)"
+ },
+ "177": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "178": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "179": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "180": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "181": {
+  "v": "drop",
+  "agree": "C",
+  "note": "反事实(主食产业化无高盐高脂导向)"
+ },
+ "182": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "183": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "184": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "185": {
+  "v": "flag",
+  "agree": "?",
+  "note": "★重要:185-206 同属一份绿色金融支持目录。Claude判'原文无此条目=引擎幻构',但这些(大气/水/固废污染防治装备制造等)是该目录真实条目,Claude看不到是因40k截断→截断假象,判删理由站不住。但反过来:这是份金融目录(CSDH结构性),且'金融支持制造→部署→减排→健康'链很长→按CSDH门控归0也说得通。两面性,需你定;并暴露管线bug:审计员看到的文本应与引擎一致/含相关段"
+ },
+ "186": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185(绿色金融目录截断假象)"
+ },
+ "187": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "188": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "189": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "190": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "191": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "192": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "193": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "194": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "195": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "196": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "197": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "198": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "199": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "200": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "201": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "202": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "203": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "204": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "205": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "206": {
+  "v": "flag",
+  "agree": "?",
+  "note": "同185"
+ },
+ "207": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "208": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "209": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "210": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "211": {
+  "v": "drop",
+  "agree": "C",
+  "note": "题号应题7"
+ },
+ "212": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "213": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "214": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "215": {
+  "v": "drop",
+  "agree": "C",
+  "note": "幻觉(原文无放松排污)"
+ },
+ "216": {
+  "v": "drop",
+  "agree": "C",
+  "note": "原则性表述非具体划拨,偏过度;可议"
+ },
+ "217": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "218": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "219": {
+  "v": "drop",
+  "agree": "C",
+  "note": "方向也错(应效益)"
+ },
+ "220": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "221": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "222": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "223": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "224": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "225": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "226": {
+  "v": "drop",
+  "agree": "C",
+  "note": "可议:高温津贴本与热相关,若改成直接链(津贴→防暑保障→降中暑)或可保留;但现写法经收入→营养是过度伸展"
+ },
+ "227": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "228": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "229": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "230": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "231": {
+  "v": "drop",
+  "agree": "C",
+  "note": "中医院评审指标类,非干预措施,过度伸展;整组231-239同理"
+ },
+ "232": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "233": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "234": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "235": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "236": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "237": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "238": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "239": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "240": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "241": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "242": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "243": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "244": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "245": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "246": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "247": {
+  "v": "drop",
+  "agree": "C",
+  "note": "Claude锚定判得好:政策是林下经营非绿地开放,'促进户外活动'无原文锚点"
+ },
+ "248": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "249": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "250": {
+  "v": "drop",
+  "agree": "C",
+  "note": "另有方向问题(原判不利影响应为效益)"
+ },
+ "251": {
+  "v": "drop",
+  "agree": "C",
+  "note": "题号应为题3非题2(DeepSeek也这么说)"
+ },
+ "252": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "253": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "254": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "255": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "256": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "257": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "258": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "259": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "260": {
+  "v": "keep",
+  "agree": "DS",
+  "note": "★我与Claude不同:中小学食堂自营减少逐利→降食源性疾病,机制合理且锚定原文;Claude'无稳健证据'门槛过高,倾向保留(至少边界)"
+ },
+ "261": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "262": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "263": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "264": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "265": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "266": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "267": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "268": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "269": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "270": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "271": {
+  "v": "drop",
+  "agree": "C",
+  "note": "另题号应为题6"
+ },
+ "1": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "2": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "3": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "4": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "5": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "6": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "7": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "8": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "9": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "10": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "11": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "12": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "13": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "14": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "15": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "16": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "17": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "18": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "19": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "20": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "21": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "22": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "23": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "24": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "25": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "26": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "27": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "28": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "29": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "30": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "31": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "32": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "33": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "34": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "35": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "36": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "37": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "38": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "39": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "40": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "41": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "42": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "43": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "44": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "45": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "46": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "47": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "48": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "49": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "50": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "51": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "52": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "53": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "54": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "55": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "56": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "57": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "58": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "59": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "60": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "61": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "62": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "63": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "64": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "65": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "66": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "67": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "68": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "69": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "70": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "71": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "72": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "73": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "74": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "75": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "76": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "77": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "78": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "79": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "80": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "81": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "82": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "83": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "84": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "85": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "86": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "87": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "88": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "89": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "90": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "91": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "92": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "93": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "94": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "95": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "96": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "97": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "98": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "99": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "100": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "101": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "102": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "103": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "104": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "105": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "106": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "107": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "108": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "109": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "110": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "111": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "112": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "113": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "114": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "115": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "116": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "117": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "118": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "119": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "120": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "121": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "122": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "123": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "124": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "125": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "126": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "127": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "128": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "129": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "130": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "131": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "132": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "133": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "134": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "135": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "136": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "137": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "138": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "139": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "140": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "141": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "142": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "143": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "144": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "145": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "146": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "147": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "148": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "149": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "150": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "151": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "152": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "153": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "154": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "155": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "156": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "157": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "158": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "159": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "160": {
+  "v": "drop",
+  "agree": "C"
+ },
+ "272": {
+  "v": "drop",
+  "agree": "C"
+ }
+}

@@ -17,9 +17,17 @@ Thumbs.db
 # 运行时数据(批测结果、专家反馈、协同案例)——按需导出/备份,不入库
 eval/out/
 eval/out_*/
-eval/_*.log
+eval/*.log
+eval/_out_*/
+eval/_baseline_*.bak
+eval/crosscheck/
+eval/cc_*/
+eval/*.npz
+eval/_sample_*.json
+~$*
 feedback/
 cases/
+# 注:eval/labels_auto.json、eval/baseline.json 是金标准,入库(供另一台机复算回归)
 # 用户在「证据库管理」界面新增的证据卡(覆盖层);用界面「导出」备份/合并回 hia_evidence.py
 evidence_user.json
 
@@ -29,3 +37,4 @@ evidence_user.json
 .std_text/
 .run.log
 .smoketest.py
+eval/_benefit_era/
