@@ -164,6 +164,30 @@
 - **跨机工作流补充**:eval 运行时产物(`out_*/cc_*/crosscheck/*.npz/*.log/_*`)已 gitignore;
   入库的金标准 = `labels_auto.json`、`determinants.py`、`adjudication_*`。
 
+## 本会话新增(2026-06-18 第二段:★危害+措施模板库蒸馏完成)
+把待办#7 的「危害+措施模板蒸馏」从脚手架跑成了**实产物 `eval/templates_harm.json`(80 个验证版危害模板)**。
+关键澄清了一个易混淆点:**「flash+pro」与「flash+模板」不是运行时二选一,是同一飞轮的串行阶段——pro 审正是产出模板的工序;运行时不含 pro(贵),走 flash→ID-join 模板检索→确定性剪枝。**
+- **路线澄清(重要)**:效益期结论「模板提示注入没用」只在**效益开放空间**成立;危害是**接近封闭的有限集**
+  (CSDH 39 枢纽 + 国标限值),模板路线**回归**——但角色从「注入提示生成」(失败过)改为**「检索约束/checklist + 供措施」**
+  (RAG,治自由生成)。**严禁机械反转效益路径方向造危害**(=硬造危害,SYS_AUDIT 头号 drop)。
+- **飞轮实跑(48 A 试点 → 扩 342)**:① 候选集从 48 份 A 扩到 **342 份(301 危害高发 ∪ 48 A,跨 53 部门)**——
+  301 份用**效益期 harvest 当候选筛选器**选出(触及 AIR/NOISE/WATER/SOIL/ROAD/CHEM/WORK_ENV 等物理枢纽的政策),
+  治「A 仅 48 偏航空」;② **flash 危害引擎**跑 342:250 份出危害(1037 条)、92 份判 0(门控正常),0 失败;
+  ③ **pro=v4-pro 交叉审**(`CROSS_BACKEND=deepseek CROSS_MODEL=deepseek-v4-pro`)342 份,0 漏判;
+  ④ `build_templates`(已扩展)join harvest+crosscheck → 按 (枢纽,题,方向=风险) 聚类 **80 模板**。
+- **pro 审硬数据(印证「强审弱」)**:flash 危害生成**精确率仅 0.425**、召回 0.937 → 严重过度生成;
+  错误类型 top = **硬造危害 107 / 低价值常规施工影响 97 / 低价值常规影响 52**(正是危害转向要消灭的假阳);
+  1037 候选 → **keep 248/fix 58/drop 731(drop 70%)**+pro 补漏 46 = 352 金标准危害路径。
+- **模板库画像**:80 模板覆盖 **29 个枢纽 + 全 10 题**;52 个带具体建议措施;41 个命中≥2 政策(可复用)、39 长尾单例。
+  每模板含 **`mitigation_dist`(措施缺口分布:未提及/不足/已含)+ `measure_examples`(代表性建议措施 top5)**——
+  供运行时按枢纽 ID-join 检索回填,这是 HIA 交付物核心。Top:STRESS·Q7(26策17部)/CHEM·Q3(22/15)/AIR·Q6/ROAD·Q3/SOIL·Q3/WORK_ENV·Q3。
+- **代码改动**:`build_templates.py`+`cluster_templates.py` 扩展聚合 `measures`+`mitigation_dist`;方向归一(危害→风险,
+  防 pro 补漏的「危害」与引擎「风险」把模板切碎,105→80);HARVEST_DIR/CROSS_DIR/TEMPLATES_OUT 环境变量化(危害版独立目录不碰 `_benefit_era/`)。
+  运行时数据 `eval/out_harm/`、`eval/crosscheck_harm/`、`eval/policies_harm_*/` 走 gitignore;入库的是 `templates_harm.json` + 脚本改动。
+- **未完(接下来)**:① 把 `templates_harm.json` 接进运行时——`hia_evidence`/`expand_pathways` 按枢纽 ID-join 检索模板**约束+回填措施**(待办#8 地基已铺 `resolve/outcomes_of`);
+  ② 留出集重测「模板约束版 vs 纯剪枝版」精确/召回(守纪律:别凭推理当定论);③ 措施有时被存成 list-repr 字符串(`['..','..']`),小瑕疵,回填前 join 一下。
+- ⚠ 仍未上线(线上是旧效益版 deepseek-chat);模板库是离线资产,接进运行时+校准后才随危害转向一起 push。
+
 ## 待办 / 进行中
 1. **域名 + HTTPS**:`tjhealthycitylab.com` 备案通过后,按 `docs/DEPLOY_HTTPS.md` 配 `hia.` 子域名 DNS+Nginx+HTTPS。
 2. **知识库扩充**(进行中):用户在 `std.samr.gov.cn` 按 `docs/gb_standards_shoplist.md` / `standards_master_list.md` 取证;拿到**现行编号+URL** 后加进 `hia_evidence.py` 的 `CARDS` + 配 `_SYN_GROUPS` + 跑 `eval` 验证。
@@ -173,7 +197,7 @@
 6. **可选功能**:项目台账状态流转、角色/权限、监管看板、站内推送。
 7. **★危害转向收尾(进行中,本会话核心)**:
    - **产品侧**:`build_screen_docx`/界面要展示每条危害的 `mitigation`(措施缺口)+ `measures`(建议措施)——这是 HIA 交付物,目前引擎已产出但前端/docx 还没渲。
-   - **危害+措施模板蒸馏**:用校准好的引擎(flash)在候选政策上跑 → pro 审 → 聚类**危害+措施模板库**(替代已归档的效益期 `_benefit_era/`)。
+   - ~~**危害+措施模板蒸馏**~~ ✅ **已完成**(2026-06-18 第二段):flash 跑 342 候选 → v4-pro 审 → 聚类出 `eval/templates_harm.json`(80 模板,带措施缺口+建议措施)。**剩下:接进运行时按枢纽 ID-join 检索约束+回填措施(并入待办#8)。**
    - **评测真值校准**:危害粗标偏保守、与"措施缺口"口径有差;改以 **pro 逐路径审**为真值,在留出集上量危害识别的精确/召回 + "硬造危害"假阳率。
    - **上线**:危害转向 + flash/pro 需 `git push` → 服务器 `git pull && systemctl restart hia` 才生效(线上仍是旧效益版 deepseek-chat)。
 8. **末段 ID-join**:`hia_evidence.match` 从关键词 substring 换成按 `determinants` 枢纽 ID 精确 join(已验证召回↑精度↑);证据卡补 hub_id 字段。

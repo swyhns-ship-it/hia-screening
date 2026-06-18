@@ -49,7 +49,8 @@ def main():
     if not files:
         sys.exit("没找到引擎输出 @ " + IN_DIR + "(先跑 run_eval,EVAL_OUT 指此目录)")
     clusters = collections.defaultdict(lambda: {"instances": [], "policies": set(),
-                                                "depts": set(), "actions": [], "chains": []})
+                                                "depts": set(), "actions": [], "chains": [],
+                                                "mitigations": collections.Counter(), "measures": []})
     n_path = n_gated = 0
     for f in files:
         try:
@@ -78,17 +79,26 @@ def main():
             c["depts"].add(dept)
             c["actions"].append(chain[0])
             c["chains"].append(" → ".join(chain))
+            mit = (p.get("mitigation") or "").strip()
+            if mit:
+                c["mitigations"][mit] += 1
+            mea = (p.get("measures") or "").strip()
+            if mea:
+                c["measures"].append(mea)
 
     # 整理成候选模板,按覆盖政策数排序
     out = []
     for (hub, q, direction), c in clusters.items():
         action_freq = collections.Counter(c["actions"])
+        measure_freq = collections.Counter(c["measures"])
         out.append({
             "template_id": "T_%s_Q%s_%s" % (hub, q, "B" if direction == "效益" else "R"),
             "hub": hub, "hub_name": D.hub(hub)["name"] if D.hub(hub) else hub,
             "outcome_q": q, "direction": direction,
             "n_instances": len(c["instances"]), "n_policies": len(c["policies"]),
             "n_depts": len(c["depts"]),
+            "mitigation_dist": dict(c["mitigations"]),
+            "measure_examples": [m for m, _ in measure_freq.most_common(5)],
             "action_examples": [a for a, _ in action_freq.most_common(6)],
             "chain_examples": c["chains"][:3],
         })

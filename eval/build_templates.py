@@ -22,9 +22,9 @@ import determinants as D                       # noqa: E402
 from cluster_templates import primary_hub      # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HARVEST = os.path.join(ROOT, "eval", "out_harvest")
-CROSS = os.path.join(ROOT, "eval", "crosscheck")
-OUT = os.path.join(ROOT, "eval", "templates_validated.json")
+HARVEST = os.path.join(ROOT, os.environ.get("HARVEST_DIR", os.path.join("eval", "out_harvest")))
+CROSS = os.path.join(ROOT, os.environ.get("CROSS_DIR", os.path.join("eval", "crosscheck")))
+OUT = os.path.join(ROOT, "eval", os.environ.get("TEMPLATES_OUT", "templates_harm.json"))
 
 
 def validated_pathways(name):
@@ -47,9 +47,12 @@ def validated_pathways(name):
         if not v:
             continue
         j = v.get("judgment")
+        # 措施三件套从引擎原始路径取:审计 fix schema 不含 measures/mitigation,
+        # keep/fix 都沿用引擎产出的措施缺口判断与建议措施(HIA 模板的核心交付物)。
         if j == "keep":
             out.append({"chain": p.get("chain", []), "outcome_q": p.get("outcome_q"),
                         "direction": p.get("direction", ""), "strength": p.get("strength", ""),
+                        "mitigation": p.get("mitigation", ""), "measures": p.get("measures", ""),
                         "src": "keep"})
         elif j == "fix":
             fx = v.get("fix") or {}
@@ -57,11 +60,13 @@ def validated_pathways(name):
                         "outcome_q": fx.get("outcome_q") or p.get("outcome_q"),
                         "direction": fx.get("direction") or p.get("direction", ""),
                         "strength": fx.get("strength") or p.get("strength", ""),
+                        "mitigation": p.get("mitigation", ""), "measures": p.get("measures", ""),
                         "src": "fix"})
         # drop → 丢弃
-    for m in (aud.get("missing") or []):        # 补回 Claude 发现的漏报
+    for m in (aud.get("missing") or []):        # 补回审计发现的漏报(审计未给措施,留空)
         out.append({"chain": m.get("chain", []), "outcome_q": m.get("outcome_q"),
-                    "direction": m.get("direction", ""), "strength": "中", "src": "missing"})
+                    "direction": m.get("direction", ""), "strength": "中",
+                    "mitigation": "", "measures": "", "src": "missing"})
     return out
 
 
@@ -70,7 +75,8 @@ def main():
              for f in glob.glob(os.path.join(CROSS, "*.json"))
              if not os.path.basename(f).startswith("_")]
     clusters = collections.defaultdict(lambda: {"policies": set(), "depts": set(),
-                                                "actions": [], "chains": [], "src": collections.Counter()})
+                                                "actions": [], "chains": [], "src": collections.Counter(),
+                                                "mitigations": collections.Counter(), "measures": []})
     n_val = n_gated = 0
     for name in names:
         dept = name.split("_")[0]
@@ -83,22 +89,34 @@ def main():
             if not hub:
                 n_gated += 1
                 continue
-            key = (hub, q, p["direction"])
+            # 本工具只筛危害:引擎归一为"风险"、pro 补漏/fix 写"危害",同义 → 统一并入"风险"
+            direction = "效益" if p["direction"] == "效益" else "风险"
+            key = (hub, q, direction)
             c = clusters[key]
             c["policies"].add(name)
             c["depts"].add(dept)
             c["actions"].append(chain[0])
             c["chains"].append(" → ".join(chain))
             c["src"][p["src"]] += 1
+            mit = (p.get("mitigation") or "").strip()
+            if mit:
+                c["mitigations"][mit] += 1
+            mea = (p.get("measures") or "").strip()
+            if mea:
+                c["measures"].append(mea)
     out = []
     for (hub, q, direction), c in clusters.items():
         af = collections.Counter(c["actions"])
+        mf = collections.Counter(c["measures"])
         out.append({
             "template_id": "T_%s_Q%s_%s" % (hub, q, "B" if direction == "效益" else "R"),
             "hub": hub, "hub_name": D.hub(hub)["name"] if D.hub(hub) else hub,
             "outcome_q": q, "direction": direction,
             "n_policies": len(c["policies"]), "n_depts": len(c["depts"]),
             "src": dict(c["src"]),
+            # 危害模板核心:措施缺口分布 + 代表性建议措施(供运行时按枢纽检索回填)
+            "mitigation_dist": dict(c["mitigations"]),
+            "measure_examples": [m for m, _ in mf.most_common(5)],
             "action_examples": [a for a, _ in af.most_common(6)],
             "chain_examples": c["chains"][:3],
         })
@@ -106,12 +124,14 @@ def main():
     json.dump(out, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print("验证后路径 %d(%d 条未落触发枢纽丢弃)→ 验证模板 %d 个 → %s\n"
           % (n_val, n_gated, len(out), OUT))
-    print("=== 验证后 Top 25 模板(按命中政策数)===")
-    print("%-24s %3s %3s  %s" % ("模板", "策", "部", "措施样本"))
+    print("=== 验证后 Top 25 危害模板(按命中政策数)===")
+    print("%-22s %3s %3s  %-16s  %s" % ("模板(枢纽·题·向)", "策", "部", "措施缺口", "建议措施样本"))
     for t in out[:25]:
-        print("%-24s %3d %3d  %s" % (
+        gap = "/".join("%s%d" % (k, v) for k, v in t["mitigation_dist"].items()) or "—"
+        mea = (t["measure_examples"][0] if t["measure_examples"] else "—")
+        print("%-22s %3d %3d  %-16s  %s" % (
             "%s·Q%d·%s" % (t["hub"], t["outcome_q"], t["direction"]),
-            t["n_policies"], t["n_depts"], "/".join(t["action_examples"][:3])[:44]))
+            t["n_policies"], t["n_depts"], gap[:16], mea[:40]))
 
 
 if __name__ == "__main__":

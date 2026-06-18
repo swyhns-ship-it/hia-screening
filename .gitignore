@@ -21,7 +21,10 @@ eval/*.log
 eval/_out_*/
 eval/_baseline_*.bak
 eval/crosscheck/
+eval/crosscheck_harm/
 eval/cc_*/
+eval/policies_harm_*/
+eval/templates_candidates.json
 eval/*.npz
 eval/_sample_*.json
 ~$*
