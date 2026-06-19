@@ -16,6 +16,7 @@ B 危害≈0 / X 无对象 / C 抽取失败)。据此切五层:
 输出 eval/_funnel_sample.json:[{key, dept, hia_object, label, stratum, path}]。
 """
 import collections
+import glob
 import json
 import os
 import re
@@ -23,7 +24,25 @@ import re
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LABELS = os.path.join(ROOT, "eval", "labels_auto.json")
 CORPUS = r"E:\projects\test2"
-OUT = os.path.join(ROOT, "eval", "_funnel_sample.json")
+# BATCH=1 → _funnel_sample.json(原批);BATCH=2.. → _funnel_sample2.json 等,且【排除之前各批已用政策】,
+# 得到同分层逻辑下的全新一批(留出验证,防在同 28 份上过拟合)。
+BATCH = os.environ.get("BATCH", "1").strip()
+OUT = os.path.join(ROOT, "eval",
+                   "_funnel_sample.json" if BATCH == "1" else "_funnel_sample%s.json" % BATCH)
+
+
+def used_keys():
+    """收集所有已存在批次(_funnel_sample*.json)里用过的政策 key,供排除。"""
+    used = set()
+    for p in glob.glob(os.path.join(ROOT, "eval", "_funnel_sample*.json")):
+        if os.path.abspath(p) == os.path.abspath(OUT):
+            continue
+        try:
+            for r in json.load(open(p, encoding="utf-8")):
+                used.add(r["key"])
+        except Exception:
+            pass
+    return used
 
 KW = re.compile(r"施工|扬尘|噪声|排放|污染|废|危化|危险品|交通|养老|医疗|供水|食品|职业|"
                 r"化工|矿|建设|改造|园区|畜禽|垃圾|管网|核|辐射")
@@ -64,14 +83,15 @@ def find_file(key):
 
 def main():
     d = json.load(open(LABELS, encoding="utf-8"))
+    skip = used_keys()       # 排除之前各批已用政策(BATCH=1 时为空)
 
-    A = [k for k, v in d.items() if v["label"] == "A"]
+    A = [k for k, v in d.items() if v["label"] == "A" and k not in skip]
     Bp = [k for k, v in d.items() if v["label"] == "B"
-          and v["hia_object"] in ("policy", "program", "project")]
+          and v["hia_object"] in ("policy", "program", "project") and k not in skip]
     Bp_kw = [k for k in Bp if KW.search(k)]
     Bp_plain = [k for k in Bp if not KW.search(k)]
-    Xn = [k for k, v in d.items() if v["label"] == "X"]
-    C = [k for k, v in d.items() if v["label"] == "C"]
+    Xn = [k for k, v in d.items() if v["label"] == "X" and k not in skip]
+    C = [k for k, v in d.items() if v["label"] == "C" and k not in skip]
 
     strata = [
         ("S1_A_有潜在危害", spread_pick(A, 12)),

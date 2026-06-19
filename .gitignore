@@ -27,7 +27,7 @@ eval/policies_harm_*/
 eval/templates_candidates.json
 eval/*.npz
 eval/_sample_*.json
-eval/_funnel_sample.json
+eval/_funnel_sample*.json
 ~$*
 feedback/
 cases/
